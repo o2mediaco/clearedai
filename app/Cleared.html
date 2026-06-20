@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Cleared — door to door, gate to meeting</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-25..0" />
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: #070a09; }
+  body { font-family: 'Manrope', sans-serif; -webkit-font-smoothing: antialiased; overflow: hidden; }
+  .msym { font-family: 'Material Symbols Rounded'; font-weight: normal; font-style: normal;
+    display: inline-block; white-space: nowrap; direction: ltr; line-height: 1;
+    letter-spacing: normal; text-transform: none; word-wrap: normal;
+    font-feature-settings: 'liga'; -webkit-font-feature-settings: 'liga'; -moz-font-feature-settings: 'liga'; }
+  #stage { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; }
+  ::-webkit-scrollbar { width: 0; height: 0; }
+  @keyframes cl-pulse { 0% { box-shadow: 0 0 0 0 currentColor; } 70% { box-shadow: 0 0 0 7px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
+  @keyframes cl-slide { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: none; } }
+  @keyframes cl-fade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+  .scrollarea { scrollbar-width: none; }
+</style>
+</head>
+<body>
+<div id="stage"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script type="text/babel" src="data.jsx"></script>
+<script type="text/babel" src="ui.jsx"></script>
+<script type="text/babel" src="hero.jsx"></script>
+<script type="text/babel" src="timeline.jsx"></script>
+<script type="text/babel" src="tweaks-panel.jsx"></script>
+
+<script type="text/babel">
+const { useState, useEffect } = React;
+
+const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+  "heroStyle": "verdict",
+  "vibe": "calm",
+  "accent": "#4f8cff"
+}/*EDITMODE-END*/;
+
+// ── phone status bar (custom, matches palette) ─────────────────────────
+function StatusBar({ t, now }) {
+  const { fmtTime } = window;
+  return (
+    <div style={{ height: 42, display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+      padding: '0 20px', position: 'relative', flexShrink: 0 }}>
+      <span style={{ fontFamily: t.mono, fontSize: 13, fontWeight: 600, color: t.text }}>{fmtTime(now)}</span>
+      <div style={{ position: 'absolute', left: '50%', top: 9, transform: 'translateX(-50%)',
+        width: 11, height: 11, borderRadius: 99, background: '#05080700', boxShadow: 'inset 0 0 0 2px #000', }} />
+      <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+        <Sym name="signal_cellular_alt" size={16} color={t.text} fill={1} />
+        <Sym name="wifi" size={16} color={t.text} fill={1} />
+        <Sym name="battery_5_bar" size={17} color={t.text} fill={1} style={{ transform: 'rotate(90deg)' }} />
+      </div>
+    </div>
+  );
+}
+
+// ── bottom navigation ──────────────────────────────────────────────────
+function BottomNav({ t, tab, go, alert }) {
+  const items = [
+    { id: 'today', icon: 'home', label: 'Today' },
+    { id: 'timeline', icon: 'checklist', label: 'Timeline' },
+    { id: 'live', icon: 'notifications', label: 'Live' },
+  ];
+  return (
+    <div style={{ flexShrink: 0, display: 'flex', padding: '6px 8px 4px',
+      borderTop: `1px solid ${t.line}`, background: t.bgTop }}>
+      {items.map((it) => {
+        const active = tab === it.id;
+        return (
+          <button key={it.id} onClick={() => go(it.id)} style={{ flex: 1, border: 'none', cursor: 'pointer',
+            background: 'transparent', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
+            padding: '6px 0' }}>
+            <span style={{ position: 'relative', display: 'inline-flex', padding: '4px 18px', borderRadius: 99,
+              background: active ? t.accent + '24' : 'transparent', transition: 'background .2s' }}>
+              <Sym name={it.icon} size={23} color={active ? t.accent : t.dim} fill={active ? 1 : 0} />
+              {it.id === 'live' && alert > 0 && (
+                <span style={{ position: 'absolute', top: 1, right: 12, width: 15, height: 15, borderRadius: 99,
+                  background: t.red, color: '#fff', fontFamily: t.mono, fontSize: 9.5, fontWeight: 700,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{alert}</span>
+              )}
+            </span>
+            <span style={{ fontFamily: t.body, fontSize: 10.5, fontWeight: active ? 700 : 600,
+              color: active ? t.text : t.faint }}>{it.label}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── apply N live events → state, and compute per-event buffer impacts ───
+function buildState(n) {
+  const st = window.freshState();
+  for (let i = 0; i < n; i++) window.TRIP.EVENTS[i].apply(st);
+  return st;
+}
+function changedFor(n) {
+  const map = { delay: ['flight'], immig: ['immigration'], traffic: ['drive', 'didi'] };
+  const set = new Set();
+  for (let i = 0; i < n; i++) (map[window.TRIP.EVENTS[i].id] || []).forEach((x) => set.add(x));
+  return set;
+}
+function computeImpacts() {
+  const out = [];
+  for (let i = 0; i < window.TRIP.EVENTS.length; i++) {
+    const before = window.computeSchedule(buildState(i)).buffer;
+    const sAfter = window.computeSchedule(buildState(i + 1));
+    out.push({ before, after: sAfter.buffer, color: sAfter.status.color });
+  }
+  return out;
+}
+
+function useFit(w, h) {
+  const [scale, setScale] = useState(1);
+  useEffect(() => {
+    const fit = () => setScale(Math.min(1, (window.innerHeight - 24) / h, (window.innerWidth - 24) / w));
+    fit(); window.addEventListener('resize', fit);
+    return () => window.removeEventListener('resize', fit);
+  }, [w, h]);
+  return scale;
+}
+
+function App() {
+  const [t0, setTweak] = useTweaks(TWEAK_DEFAULTS);
+  const [tab, setTab] = useState('today');
+  const [fired, setFired] = useState(0);
+  const now = useNow(window.TRIP.BASE.now);
+
+  const theme = makeTheme({ accent: t0.accent, vibe: t0.vibe });
+  const schedule = window.computeSchedule(buildState(fired));
+  const changedSet = changedFor(fired);
+  const impacts = computeImpacts();
+  const scale = useFit(412, 892);
+
+  const go = (x) => setTab(x);
+
+  let screen;
+  if (tab === 'today') screen = <TodayScreen s={schedule} t={theme} heroStyle={t0.heroStyle} now={now} go={go} />;
+  else if (tab === 'timeline') screen = <TimelineScreen s={schedule} t={theme} changedSet={changedSet} />;
+  else screen = <LiveScreen s={schedule} t={theme} fired={fired} setFired={setFired} impacts={impacts} go={go} />;
+
+  return (
+    <ThemeCtx.Provider value={theme}>
+      <div style={{ width: 412, height: 892, transform: `scale(${scale})`, transformOrigin: 'center',
+        borderRadius: 46, padding: 9, background: 'linear-gradient(160deg,#23312a,#0d1411)',
+        boxShadow: '0 40px 110px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.04)' }}>
+        <div style={{ width: '100%', height: '100%', borderRadius: 38, overflow: 'hidden',
+          display: 'flex', flexDirection: 'column',
+          background: `radial-gradient(120% 60% at 50% 0%, ${theme.bgTop}, ${theme.bg} 60%)` }}>
+          <StatusBar t={theme} now={now} />
+          <div className="scrollarea" key={tab} style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden' }}>
+            {screen}
+          </div>
+          <BottomNav t={theme} tab={tab} go={go} alert={fired} />
+          <div style={{ height: 22, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, background: theme.bgTop }}>
+            <div style={{ width: 130, height: 5, borderRadius: 99, background: 'rgba(255,255,255,0.22)' }} />
+          </div>
+        </div>
+      </div>
+
+      <TweaksPanel>
+        <TweakSection label="Hero verdict" />
+        <TweakSelect label="Style" value={t0.heroStyle}
+          options={[
+            { value: 'verdict', label: 'Verdict — you’ll make it' },
+            { value: 'leaveby', label: 'Leave by — big target time' },
+            { value: 'countdown', label: 'Countdown — leave in N min' },
+            { value: 'go', label: 'Go / No-go status' },
+          ]}
+          onChange={(v) => { setTweak('heroStyle', v); setTab('today'); }} />
+        <TweakSection label="Vibe" />
+        <TweakRadio label="Density" value={t0.vibe}
+          options={[{ value: 'calm', label: 'Calm' }, { value: 'sharp', label: 'Sharp' }]}
+          onChange={(v) => setTweak('vibe', v)} />
+        <TweakSection label="Accent" />
+        <TweakColor label="Brand color" value={t0.accent}
+          options={['#3ddc84', '#4f8cff', '#b794f6', '#f6c454']}
+          onChange={(v) => setTweak('accent', v)} />
+        <TweakSection label="Live demo" />
+        <TweakButton label="Jump to Live feed" onClick={() => setTab('live')} />
+      </TweaksPanel>
+    </ThemeCtx.Provider>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('stage')).render(<App />);
+</script>
+</body>
+</html>

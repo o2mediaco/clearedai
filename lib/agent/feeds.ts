@@ -1,43 +1,49 @@
-// feeds.ts — the data feeds the agent senses. Hybrid by design:
-// FEED_MODE=mock (default) plays a deterministic disruption arc so the demo is
-// reliable; FEED_MODE=real attempts a live API (flight status wired) and falls
-// back to mock per-feed when a key or datapoint is missing.
+// feeds.ts — the data feeds the agent senses. Hybrid: FEED_MODE=mock (default)
+// plays a deterministic 4-beat arc; FEED_MODE=real attempts live APIs
+// (FlightAware for flights, Google Routes for traffic) and falls back to mock.
+//
+// The arc is designed to show the agent's *judgment*:
+//   1. KE012 +95 min  → absorbed by the 15h Seoul layover → arrival UNCHANGED
+//   2. KE863 +50 min  → directly slips arrival              → escalate
+//   3. PEK immigration +20 → slips further                  → major
+//   4. Beijing traffic clears (−30) → partial recovery
 
 import type { FeedId, FeedReading, Overrides, Trip } from "../types";
 
 export interface FeedDef {
   id: FeedId;
   label: string;
-  /** what the agent should understand this feed measures */
   description: string;
-  /** deterministic mock arc: returns readings only on the tick it has news */
   pollMock: (tick: number, ov: Overrides) => FeedReading[];
-  /** optional live implementation; throws to signal "fall back to mock" */
   pollReal?: (trip: Trip, ov: Overrides) => Promise<FeedReading[]>;
 }
 
 function reading(
   feed: FeedId,
+  scope: "flight" | "leg",
   target: string,
   value: number,
   previous: number,
   source: "real" | "mock",
   note: string
 ): FeedReading {
-  return { feed, target, value, previous, source, note };
+  return { feed, scope, target, value, previous, source, note };
 }
 
-// ── deterministic disruption arc (buffer: 39 → 14 → 0 → 14) ─────────────
 export const FEEDS: FeedDef[] = [
   {
     id: "flight_status",
-    label: "UA857 status",
-    description: "Departure delay in minutes for flight UA857 (writes flightDelay).",
-    pollMock: (tick, ov) =>
-      tick === 1 && ov.flightDelay !== 25
-        ? [reading("flight_status", "flightDelay", 25, ov.flightDelay, "mock",
-            "United pushed UA857 to 10:35 AM departure (+25 min). Gate G98 unchanged.")]
-        : [],
+    label: "Korean Air status",
+    description: "Departure delay (min) for KE012 (LAX→ICN) and KE863 (ICN→PEK).",
+    pollMock: (tick, ov) => {
+      if (tick === 1 && (ov.flightDelay.KE012 || 0) !== 95)
+        return [reading("flight_status", "flight", "KE012", 95, ov.flightDelay.KE012 || 0, "mock",
+          "Korean Air KE012 (LAX→ICN) delayed 95 min — weather hold at LAX.")];
+      if (tick === 2 && (ov.flightDelay.KE863 || 0) !== 50)
+        return [reading("flight_status", "flight", "KE863", 50, ov.flightDelay.KE863 || 0, "mock",
+          "Korean Air KE863 (ICN→PEK) now departing 20:50 KST (+50 min).")];
+      return [];
+    },
     // FlightAware AeroAPI — https://www.flightaware.com/aeroapi/portal/documentation
     pollReal: async (trip, ov) => {
       const key =
@@ -46,85 +52,123 @@ export const FEEDS: FeedDef[] = [
         process.env.FLIGHTAWARE_API_KEY ||
         process.env.aero_api_key;
       if (!key) throw new Error("no aeroapi key");
-      const ident = trip.flight.code; // e.g. UA857
-      const res = await fetch(
-        `https://aeroapi.flightaware.com/aeroapi/flights/${encodeURIComponent(ident)}`,
-        { headers: { "x-apikey": key, Accept: "application/json" }, cache: "no-store" }
-      );
-      if (!res.ok) throw new Error(`aeroapi ${res.status}`);
-      const data = await res.json();
-      const f = data?.flights?.[0];
-      if (!f) throw new Error("aeroapi: no flight found");
-      // AeroAPI returns departure_delay in seconds; fall back to estimated−scheduled.
-      let delayMin = 0;
-      if (typeof f.departure_delay === "number") {
-        delayMin = Math.round(f.departure_delay / 60);
-      } else if (f.estimated_out && f.scheduled_out) {
-        delayMin = Math.round((Date.parse(f.estimated_out) - Date.parse(f.scheduled_out)) / 60000);
+      const out: FeedReading[] = [];
+      for (const f of trip.flights) {
+        try {
+          const res = await fetch(
+            `https://aeroapi.flightaware.com/aeroapi/flights/${encodeURIComponent(f.code)}`,
+            { headers: { "x-apikey": key, Accept: "application/json" }, cache: "no-store" }
+          );
+          if (!res.ok) continue;
+          const data = await res.json();
+          const fl = data?.flights?.[0];
+          if (!fl) continue;
+          let delayMin = 0;
+          if (typeof fl.departure_delay === "number") delayMin = Math.round(fl.departure_delay / 60);
+          else if (fl.estimated_out && fl.scheduled_out)
+            delayMin = Math.round((Date.parse(fl.estimated_out) - Date.parse(fl.scheduled_out)) / 60000);
+          delayMin = Math.max(0, delayMin);
+          if ((ov.flightDelay[f.id] || 0) !== delayMin)
+            out.push(reading("flight_status", "flight", f.id, delayMin, ov.flightDelay[f.id] || 0, "real",
+              `Live (AeroAPI): ${f.code} departure delay ${delayMin} min.`));
+        } catch {
+          /* skip this flight */
+        }
       }
-      delayMin = Math.max(0, delayMin);
-      return delayMin !== ov.flightDelay
-        ? [reading("flight_status", "flightDelay", delayMin, ov.flightDelay, "real",
-            `Live (AeroAPI): ${ident} departure delay ${delayMin} min.`)]
-        : [];
+      if (out.length === 0) throw new Error("no flight change");
+      return out;
     },
   },
   {
     id: "security_wait",
-    label: "SFO security",
-    description: "TSA checkpoint G wait time delta in minutes (writes leg 'security').",
+    label: "LAX security",
+    description: "TSA TBIT wait delta (min) for the 'security' leg.",
     pollMock: () => [],
   },
   {
     id: "immigration_wait",
-    label: "PVG immigration",
-    description: "Foreign-passport hall wait delta in minutes (writes leg 'immigration').",
+    label: "PEK immigration",
+    description: "Beijing foreign-passport hall wait delta (min) for the 'immigration' leg.",
     pollMock: (tick, ov) =>
-      tick === 2 && (ov.dur.immigration || 0) !== 14
-        ? [reading("immigration_wait", "immigration", 14, ov.dur.immigration || 0, "mock",
-            "PVG foreign-passport hall now ~41 min (+14). Two desks just closed.")]
+      tick === 3 && (ov.dur.immigration || 0) !== 20
+        ? [reading("immigration_wait", "leg", "immigration", 20, ov.dur.immigration || 0, "mock",
+            "PEK foreign-passport hall now ~50 min (+20). Two desks just closed.")]
         : [],
   },
   {
     id: "baggage_estimate",
     label: "Baggage belt",
-    description: "Carousel 14 first-bag estimate delta in minutes (writes leg 'baggage').",
+    description: "PEK carousel first-bag estimate delta (min) for the 'baggage' leg.",
     pollMock: () => [],
   },
   {
     id: "traffic",
-    label: "Shanghai traffic",
-    description: "Drive + rideshare conditions to Lujiazui (writes legs 'drive' and 'didi').",
+    label: "Beijing traffic",
+    description: "Drive + rideshare to Beijing CBD (writes legs 'drive' and 'didi').",
     pollMock: (tick, ov) =>
-      tick === 3 && (ov.dur.drive || 0) !== -9
+      tick === 4 && (ov.dur.drive || 0) !== -25
         ? [
-            reading("traffic", "drive", -9, ov.dur.drive || 0, "mock",
-              "Yan’an E. Tunnel accident cleared — drive −9 min."),
-            reading("traffic", "didi", -5, ov.dur.didi || 0, "mock",
-              "Express Didi already waiting at curb P7 — pickup −5 min."),
+            reading("traffic", "leg", "drive", -25, ov.dur.drive || 0, "mock",
+              "Airport Expwy clears — drive to Guomao −25 min."),
+            reading("traffic", "leg", "didi", -5, ov.dur.didi || 0, "mock",
+              "Express Didi already at the curb — pickup −5 min."),
           ]
         : [],
+    // Google Routes API — traffic-aware drive time for legs with coordinates.
+    pollReal: async (trip, ov) => {
+      const key = process.env.GOOGLE_MAPS_API_KEY;
+      if (!key) throw new Error("no maps key");
+      const driveLegs = [...trip.pre, ...trip.post].filter((l) => l.feed === "traffic" && l.from && l.to);
+      const out: FeedReading[] = [];
+      for (const l of driveLegs) {
+        try {
+          const res = await fetch("https://routes.googleapis.com/directions/v2:computeRoutes", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-Goog-Api-Key": key,
+              "X-Goog-FieldMask": "routes.duration",
+            },
+            body: JSON.stringify({
+              origin: { location: { latLng: { latitude: l.from!.lat, longitude: l.from!.lng } } },
+              destination: { location: { latLng: { latitude: l.to!.lat, longitude: l.to!.lng } } },
+              travelMode: "DRIVE",
+              routingPreference: "TRAFFIC_AWARE",
+            }),
+          });
+          if (!res.ok) continue;
+          const data = await res.json();
+          const dur: string | undefined = data?.routes?.[0]?.duration; // "1234s"
+          if (!dur) continue;
+          const mins = Math.round(parseInt(dur, 10) / 60);
+          const delta = mins - l.dur;
+          if ((ov.dur[l.id] || 0) !== delta)
+            out.push(reading("traffic", "leg", l.id, delta, ov.dur[l.id] || 0, "real",
+              `Live (Google Routes): ${l.title} ~${mins} min.`));
+        } catch {
+          /* skip this leg */
+        }
+      }
+      if (out.length === 0) throw new Error("no traffic change");
+      return out;
+    },
   },
 ];
 
-export const FEED_BY_ID: Record<FeedId, FeedDef> = Object.fromEntries(
-  FEEDS.map((f) => [f.id, f])
-) as Record<FeedId, FeedDef>;
-
 export function cloneOverrides(ov: Overrides): Overrides {
-  return { flightDelay: ov.flightDelay, dur: { ...ov.dur } };
+  return { flightDelay: { ...ov.flightDelay }, dur: { ...ov.dur } };
 }
 
 export function applyReadings(ov: Overrides, readings: FeedReading[]): Overrides {
   const next = cloneOverrides(ov);
   for (const r of readings) {
-    if (r.target === "flightDelay") next.flightDelay = r.value;
+    if (r.scope === "flight") next.flightDelay[r.target] = r.value;
     else next.dur[r.target] = r.value;
   }
   return next;
 }
 
-/** Sense the world: poll every live feed once. */
+/** Sense the world: poll every feed once. */
 export async function senseFeeds(trip: Trip, ov: Overrides, tick: number): Promise<FeedReading[]> {
   const real = process.env.FEED_MODE === "real";
   const out: FeedReading[] = [];

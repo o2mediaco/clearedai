@@ -1,11 +1,32 @@
-// Shared domain types for Cleared. Used by both the client UI and the
-// server-side agent so the schedule is computed from one source of truth.
+// Shared domain types for Cleared. Multi-flight, absolute-time model.
+// All instants are UTC minutes (minutes since the Unix epoch, /60000), so the
+// engine is correct across timezones, the date line, and multi-day journeys.
+// Display converts to a segment's local timezone via Tz.offsetMin.
 
-export type Phase = "us" | "air" | "cn";
-export type LegMode = "ride" | "walk" | "queue";
 export type Tab = "today" | "timeline" | "live";
 
-/** A single door-to-door leg (a drive, a queue, a walk). */
+/** A fixed-offset timezone (June 2026 — no DST ambiguity for our routes). */
+export interface Tz {
+  label: string; // e.g. "PDT", "KST", "CST"
+  offsetMin: number; // minutes from UTC, e.g. -420 for PDT
+}
+
+export type Phase = "depart" | "connection" | "arrive";
+export type LegMode = "ride" | "walk" | "queue" | "wait";
+
+export interface GeoPoint {
+  lat: number;
+  lng: number;
+}
+
+export type FeedId =
+  | "flight_status"
+  | "security_wait"
+  | "immigration_wait"
+  | "baggage_estimate"
+  | "traffic";
+
+/** A single door-to-door ground leg (a drive, a queue, a walk, a transfer). */
 export interface Leg {
   id: string;
   phase: Phase;
@@ -19,116 +40,126 @@ export interface Leg {
   detail: string;
   /** whether a live feed watches this leg */
   live?: boolean;
-  /** id of the agent tool/feed that can update this leg */
+  /** the agent feed that can update this leg */
+  feed?: FeedId;
+  /** timezone the leg's clock times display in */
+  tz: Tz;
+  /** drive legs: endpoints for live traffic (Google Routes) */
+  from?: GeoPoint;
+  to?: GeoPoint;
+}
+
+/** A flight segment with scheduled absolute times. */
+export interface FlightSeg {
+  id: string; // "KE012"
+  code: string;
+  carrier: string;
+  aircraft?: string;
+  fromCode: string;
+  fromCity: string;
+  fromTerm: string;
+  fromTz: Tz;
+  toCode: string;
+  toCity: string;
+  toTerm: string;
+  toTz: Tz;
+  /** scheduled departure / arrival, UTC minutes */
+  departUtc: number;
+  arriveUtc: number;
+  seat?: string;
+  /** the feed that updates this flight's delay */
   feed?: FeedId;
 }
 
-export interface Flight {
-  id: "flight";
-  phase: "air";
-  icon: string;
-  code: string;
-  carrier: string;
-  from: string;
-  to: string;
-  fromCity: string;
-  toCity: string;
-  termFrom: string;
-  termTo: string;
-  seat: string;
-  gate: string;
-}
-
-export interface Meeting {
-  title: string;
-  org: string;
-  place: string;
-  /** minutes-from-midnight, destination tz */
-  time: number;
-  tz: string;
-}
-
-export interface TripBase {
-  now: number;
-  board: number;
-  depart: number;
-  blockMin: number;
-  land: number;
-  meeting: number;
-  gateCushion: number;
+/** A connection/layover between two flights at a hub. */
+export interface Connection {
+  id: string;
+  airportCode: string;
+  city: string;
+  term: string;
+  tz: Tz;
+  /** transfer legs (deplane, walk); the long wait is the implicit gap */
+  legs: Leg[];
 }
 
 export interface Trip {
-  base: TripBase;
-  pre: Leg[];
-  flight: Flight;
-  post: Leg[];
-  meeting: Meeting;
+  origin: { code: string; city: string; tz: Tz };
+  destination: { code: string; city: string; place: string; tz: Tz };
+  pre: Leg[]; // departure side (before flight 1)
+  flights: FlightSeg[]; // ordered
+  connections: Connection[]; // length = flights.length - 1
+  post: Leg[]; // arrival side (after last flight)
+  boardLeadMin: number; // departure − boarding
+  gateCushionMin: number; // target minutes at gate before boarding
+  minConnectionMin: number; // minimum viable connection time at a hub
+  deadlineUtc: number | null; // a hard deadline for verdict mode; null = ETA-only
 }
 
-/** Accumulated live deltas applied on top of the base trip. */
+/** Accumulated live deltas on top of the base trip. */
 export interface Overrides {
-  /** minutes the flight is delayed */
-  flightDelay: number;
-  /** per-leg duration deltas keyed by leg id */
+  /** per-flight departure delay in minutes, keyed by flight id */
+  flightDelay: Record<string, number>;
+  /** per-leg duration deltas in minutes, keyed by leg id */
   dur: Record<string, number>;
 }
 
 export interface StatusInfo {
-  id: "ontrack" | "tight" | "risk" | "missed";
+  id: "ontime" | "minor" | "delayed" | "major";
   label: string;
   color: string;
   soft: string;
 }
 
 export interface ComputedLeg extends Leg {
-  start: number;
-  end: number;
-  day?: number;
+  startUtc: number;
+  endUtc: number;
 }
 
-export interface ComputedFlight extends Flight {
-  dur: number;
-  start: number;
-  end: number;
-  board: number;
+export interface ComputedFlight extends FlightSeg {
+  boardUtc: number;
+  actualDepartUtc: number;
+  actualArriveUtc: number;
+  /** scheduled airborne minutes */
+  blockMin: number;
+  /** total delay vs schedule at arrival (min) */
   delay: number;
 }
 
+export interface ComputedConnection extends Connection {
+  arriveUtc: number; // when you land at the hub
+  departUtc: number; // when the next flight actually departs
+  layoverMin: number;
+  legs: ComputedLeg[];
+  tight: boolean; // layover below minConnectionMin
+}
+
 export interface Schedule {
-  leaveBy: number;
-  atGate: number;
-  gateWait: number;
+  leaveByUtc: number;
   preLegs: ComputedLeg[];
-  flightLeg: ComputedFlight;
+  flights: ComputedFlight[];
+  connections: ComputedConnection[];
   postLegs: ComputedLeg[];
-  depart: number;
-  land: number;
-  arrive: number;
-  /** minutes of slack before the meeting (negative = late) */
-  buffer: number;
+  /** final arrival at the destination, UTC minutes */
+  arriveUtc: number;
+  /** arrival with zero overrides (the original plan) */
+  baselineArriveUtc: number;
+  /** minutes later than baseline (negative = ahead of plan) */
+  slip: number;
   status: StatusInfo;
-  now: number;
-  board: number;
-  meeting: number;
+  /** deadline mode (null for ETA-only trips) */
+  deadlineUtc: number | null;
+  buffer: number | null;
 }
 
 // ── Agent / feed types ────────────────────────────────────────────────
-export type FeedId =
-  | "flight_status"
-  | "traffic"
-  | "security_wait"
-  | "immigration_wait"
-  | "baggage_estimate";
-
 /** What a single feed poll returned. */
 export interface FeedReading {
   feed: FeedId;
-  /** which override field this writes: "flightDelay" or a leg id */
+  /** "flight" → target is a flight id; "leg" → target is a leg id */
+  scope: "flight" | "leg";
   target: string;
-  /** new absolute value for the override (replaces, not adds) */
+  /** new absolute override value (replaces, not adds) */
   value: number;
-  /** previous override value, for diffing */
   previous: number;
   source: "real" | "mock";
   note: string;
@@ -144,12 +175,11 @@ export type Severity = "none" | "low" | "med" | "high" | "critical";
 
 /** A machine action the Comm/Action agent stages on the user's behalf. */
 export interface AgentAction {
-  type: string; // e.g. "rideshare", "message", "calendar"
-  label: string; // one-tap button text
-  detail: string; // what it will do / draft body
+  type: string; // "rideshare" | "message" | "calendar" | ...
+  label: string;
+  detail: string;
 }
 
-/** Step 1 — Lead Router: classify severity and set strategy. */
 export interface RouterOut {
   severity: Severity;
   engage: boolean;
@@ -157,7 +187,6 @@ export interface RouterOut {
   affected: FeedId[];
 }
 
-/** Step 2 — Logistics Analyst: cascade reasoning over the schedule. */
 export interface AnalystOut {
   bottleneck: string;
   etaSummary: string;
@@ -165,7 +194,6 @@ export interface AnalystOut {
   risks: string[];
 }
 
-/** Step 3 — Comm & Action Ops: draft the alert + machine actions. */
 export interface CommOut {
   alert: AgentAlert | null;
   actions: AgentAction[];
@@ -183,25 +211,20 @@ export interface AgentTickRequest {
 }
 
 export interface AgentTickResponse {
-  /** the model's (or mock's) reasoning about what to monitor */
   reasoning: string;
-  /** which feeds the agent chose to poll this tick */
   polled: FeedId[];
-  /** the readings it got back */
   readings: FeedReading[];
-  /** overrides after applying the readings */
   overrides: Overrides;
-  /** buffer before / after this tick */
-  bufferBefore: number;
-  bufferAfter: number;
+  /** final arrival before / after this tick (UTC minutes) */
+  arriveBefore: number;
+  arriveAfter: number;
+  /** slip vs plan before / after */
+  slipBefore: number;
+  slipAfter: number;
   status: StatusInfo;
-  /** a user-facing alert, if the agent decided one is warranted */
   alert: AgentAlert | null;
-  /** staged machine actions from the Comm/Action agent */
   actions: AgentAction[];
-  /** the full Router → Analyst → Comm trace, for the Live screen */
   pipeline: PipelineTrace;
-  /** whether Gemma actually ran, or the deterministic fallback did */
   engine: "gemma" | "mock";
   model?: string;
 }

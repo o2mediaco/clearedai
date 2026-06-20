@@ -7,18 +7,18 @@ import Timeline from "@/components/screens/Timeline";
 import Live, { type AlertEntry } from "@/components/screens/Live";
 import { computeSchedule, freshOverrides, fmtTime } from "@/lib/schedule";
 import { SEED_TRIP } from "@/lib/trip";
-import type { Overrides, Tab, PipelineTrace, AgentTickResponse } from "@/lib/types";
+import type { Overrides, Tab, PipelineTrace, AgentTickResponse, Tz } from "@/lib/types";
 
 const ACCENT = "#4f8cff";
-const MAX_TICKS = 3;
+const MAX_TICKS = 4;
 
-function useNow(startMin: number) {
+function useNow(startUtc: number) {
   const [sec, setSec] = useState(0);
   useEffect(() => {
     const iv = setInterval(() => setSec((s) => s + 1), 1000);
     return () => clearInterval(iv);
   }, []);
-  return startMin + Math.floor(sec / 30);
+  return startUtc + Math.floor(sec / 30);
 }
 
 function useFit(w: number, h: number) {
@@ -32,33 +32,11 @@ function useFit(w: number, h: number) {
   return scale;
 }
 
-function StatusBar({ t, now }: { t: Theme; now: number }) {
+function StatusBar({ t, nowUtc, tz }: { t: Theme; nowUtc: number; tz: Tz }) {
   return (
-    <div
-      style={{
-        height: 42,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
-        padding: "0 20px",
-        position: "relative",
-        flexShrink: 0,
-      }}
-    >
-      <span style={{ fontFamily: t.mono, fontSize: 13, fontWeight: 600, color: t.text }}>{fmtTime(now)}</span>
-      <div
-        style={{
-          position: "absolute",
-          left: "50%",
-          top: 9,
-          transform: "translateX(-50%)",
-          width: 11,
-          height: 11,
-          borderRadius: 99,
-          background: "#05080700",
-          boxShadow: "inset 0 0 0 2px #000",
-        }}
-      />
+    <div style={{ height: 42, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 20px", position: "relative", flexShrink: 0 }}>
+      <span style={{ fontFamily: t.mono, fontSize: 13, fontWeight: 600, color: t.text }}>{fmtTime(nowUtc, tz)}</span>
+      <div style={{ position: "absolute", left: "50%", top: 9, transform: "translateX(-50%)", width: 11, height: 11, borderRadius: 99, background: "#05080700", boxShadow: "inset 0 0 0 2px #000" }} />
       <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
         <Sym name="signal_cellular_alt" size={16} color={t.text} fill={1} />
         <Sym name="wifi" size={16} color={t.text} fill={1} />
@@ -79,58 +57,14 @@ function BottomNav({ t, tab, go, alert }: { t: Theme; tab: Tab; go: (x: Tab) => 
       {items.map((it) => {
         const active = tab === it.id;
         return (
-          <button
-            key={it.id}
-            onClick={() => go(it.id)}
-            style={{
-              flex: 1,
-              border: "none",
-              cursor: "pointer",
-              background: "transparent",
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              gap: 4,
-              padding: "6px 0",
-            }}
-          >
-            <span
-              style={{
-                position: "relative",
-                display: "inline-flex",
-                padding: "4px 18px",
-                borderRadius: 99,
-                background: active ? t.accent + "24" : "transparent",
-                transition: "background .2s",
-              }}
-            >
+          <button key={it.id} onClick={() => go(it.id)} style={{ flex: 1, border: "none", cursor: "pointer", background: "transparent", display: "flex", flexDirection: "column", alignItems: "center", gap: 4, padding: "6px 0" }}>
+            <span style={{ position: "relative", display: "inline-flex", padding: "4px 18px", borderRadius: 99, background: active ? t.accent + "24" : "transparent", transition: "background .2s" }}>
               <Sym name={it.icon} size={23} color={active ? t.accent : t.dim} fill={active ? 1 : 0} />
               {it.id === "live" && alert > 0 && (
-                <span
-                  style={{
-                    position: "absolute",
-                    top: 1,
-                    right: 12,
-                    width: 15,
-                    height: 15,
-                    borderRadius: 99,
-                    background: t.red,
-                    color: "#fff",
-                    fontFamily: t.mono,
-                    fontSize: 9.5,
-                    fontWeight: 700,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                  }}
-                >
-                  {alert}
-                </span>
+                <span style={{ position: "absolute", top: 1, right: 12, width: 15, height: 15, borderRadius: 99, background: t.red, color: "#fff", fontFamily: t.mono, fontSize: 9.5, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center" }}>{alert}</span>
               )}
             </span>
-            <span style={{ fontFamily: t.body, fontSize: 10.5, fontWeight: active ? 700 : 600, color: active ? t.text : t.faint }}>
-              {it.label}
-            </span>
+            <span style={{ fontFamily: t.body, fontSize: 10.5, fontWeight: active ? 700 : 600, color: active ? t.text : t.faint }}>{it.label}</span>
           </button>
         );
       })}
@@ -150,12 +84,12 @@ export default function Page() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const now = useNow(SEED_TRIP.base.now);
-  const scale = useFit(412, 892);
   const schedule = computeSchedule(SEED_TRIP, overrides);
+  const nowUtc = useNow(schedule.leaveByUtc - 75);
+  const scale = useFit(412, 892);
 
   const changedSet = new Set<string>();
-  if (overrides.flightDelay !== 0) changedSet.add("flight");
+  for (const [k, v] of Object.entries(overrides.flightDelay)) if (v !== 0) changedSet.add(k);
   for (const [k, v] of Object.entries(overrides.dur)) if (v !== 0) changedSet.add(k);
 
   const go = (x: Tab) => setTab(x);
@@ -188,9 +122,9 @@ export default function Page() {
             title: data.alert!.title,
             body: data.alert!.body,
             severity: data.alert!.severity,
-            time: fmtTime(now),
-            bufferBefore: data.bufferBefore,
-            bufferAfter: data.bufferAfter,
+            time: fmtTime(nowUtc + next * 30, SEED_TRIP.origin.tz),
+            slipBefore: data.slipBefore,
+            slipAfter: data.slipAfter,
             color: data.status.color,
           },
         ]);
@@ -200,7 +134,7 @@ export default function Page() {
     } finally {
       setLoading(false);
     }
-  }, [overrides, tick, now]);
+  }, [overrides, tick, nowUtc]);
 
   const onReset = useCallback(() => {
     setOverrides(freshOverrides());
@@ -213,66 +147,21 @@ export default function Page() {
   }, []);
 
   let screen: React.ReactNode;
-  if (tab === "today") screen = <Today s={schedule} t={t} now={now} go={go} trip={SEED_TRIP} />;
+  if (tab === "today") screen = <Today s={schedule} t={t} nowUtc={nowUtc} go={go} trip={SEED_TRIP} />;
   else if (tab === "timeline") screen = <Timeline s={schedule} t={t} changedSet={changedSet} trip={SEED_TRIP} />;
   else
     screen = (
-      <Live
-        s={schedule}
-        t={t}
-        trip={SEED_TRIP}
-        tick={tick}
-        loading={loading}
-        engine={engine}
-        model={model}
-        pipeline={pipeline}
-        alerts={alerts}
-        onTick={onTick}
-        onReset={onReset}
-        maxTicks={MAX_TICKS}
-      />
+      <Live s={schedule} t={t} trip={SEED_TRIP} tick={tick} loading={loading} engine={engine} model={model} pipeline={pipeline} alerts={alerts} onTick={onTick} onReset={onReset} maxTicks={MAX_TICKS} />
     );
 
   return (
     <div id="stage">
-      <div
-        style={{
-          width: 412,
-          height: 892,
-          transform: `scale(${scale})`,
-          transformOrigin: "center",
-          borderRadius: 46,
-          padding: 9,
-          background: "linear-gradient(160deg,#23312a,#0d1411)",
-          boxShadow: "0 40px 110px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.04)",
-        }}
-      >
-        <div
-          style={{
-            width: "100%",
-            height: "100%",
-            borderRadius: 38,
-            overflow: "hidden",
-            display: "flex",
-            flexDirection: "column",
-            background: `radial-gradient(120% 60% at 50% 0%, ${t.bgTop}, ${t.bg} 60%)`,
-          }}
-        >
-          <StatusBar t={t} now={now} />
+      <div style={{ width: 412, height: 892, transform: `scale(${scale})`, transformOrigin: "center", borderRadius: 46, padding: 9, background: "linear-gradient(160deg,#23312a,#0d1411)", boxShadow: "0 40px 110px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.04)" }}>
+        <div style={{ width: "100%", height: "100%", borderRadius: 38, overflow: "hidden", display: "flex", flexDirection: "column", background: `radial-gradient(120% 60% at 50% 0%, ${t.bgTop}, ${t.bg} 60%)` }}>
+          <StatusBar t={t} nowUtc={nowUtc} tz={SEED_TRIP.origin.tz} />
           <div className="scrollarea" key={tab} style={{ flex: 1, overflowY: "auto", overflowX: "hidden" }}>
             {error && (
-              <div
-                style={{
-                  margin: `8px ${t.pad}px`,
-                  padding: 12,
-                  borderRadius: 12,
-                  background: t.red + "1e",
-                  border: `1px solid ${t.red}55`,
-                  fontFamily: t.body,
-                  fontSize: 12.5,
-                  color: t.red,
-                }}
-              >
+              <div style={{ margin: `8px ${t.pad}px`, padding: 12, borderRadius: 12, background: t.red + "1e", border: `1px solid ${t.red}55`, fontFamily: t.body, fontSize: 12.5, color: t.red }}>
                 Agent error: {error}
               </div>
             )}

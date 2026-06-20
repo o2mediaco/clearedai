@@ -1,69 +1,91 @@
-// trip.ts — the seed trip (SFO → PVG, 2:00 PM Shanghai meeting).
-// Local-first MVP: this is the default trip the app loads. Each live leg is
-// tagged with the agent `feed` that can update it.
+// trip.ts — the seed itinerary: LAX → ICN (KE012) → PEK (KE863), with a 15h
+// Seoul layover. ETA-only (no hard deadline). All flight anchors are real
+// scheduled times for Jun 20–22, 2026, expressed as ISO-with-offset and
+// converted to UTC minutes so the multi-day / 3-timezone math is correct.
 
 import type { Trip } from "./types";
+import { TZ, isoToUtcMin } from "./schedule";
 
 export const SEED_TRIP: Trip = {
-  base: {
-    now: 7 * 60 + 24, // 7:24 AM PDT
-    board: 9 * 60 + 40, // 9:40 AM PDT
-    depart: 10 * 60 + 10, // 10:10 AM PDT
-    blockMin: 760, // 12h40m airborne
-    land: 11 * 60 + 50, // 11:50 AM CST (next day)
-    meeting: 14 * 60, // 2:00 PM CST
-    gateCushion: 45,
-  },
+  origin: { code: "LAX", city: "Los Angeles", tz: TZ.PDT },
+  destination: { code: "PEK", city: "Beijing", place: "Guomao · Beijing CBD", tz: TZ.CST },
+
+  // ── departure side (LAX, international, checked bag, TSA PreCheck) ──
   pre: [
-    { id: "ride", phase: "us", icon: "local_taxi", title: "Uber to SFO",
-      sub: "Marcus · Toyota Camry · 7GHK402", dur: 26, mode: "ride",
-      source: "Uber", detail: "4 min pickup wait · no surge", live: true, feed: "traffic" },
-    { id: "curb", phase: "us", icon: "directions_walk", title: "Curb → check-in",
-      sub: "Intl departures, Level 3", dur: 7, mode: "walk",
-      source: "SFO map", detail: "Door 3A to United counters" },
-    { id: "checkin", phase: "us", icon: "badge", title: "Check-in & bag drop",
-      sub: "United Premier Access", dur: 14, mode: "queue",
-      source: "Bag-drop cutoff", detail: "Closes 8:40 AM · 15 min margin" },
-    { id: "security", phase: "us", icon: "security", title: "Security",
-      sub: "TSA PreCheck — Lane 2", dur: 19, mode: "queue",
-      source: "TSA wait feed", detail: "Intl checkpoint G · 19 min", live: true, feed: "security_wait" },
-    { id: "gateUS", phase: "us", icon: "directions_walk", title: "Walk to gate G98",
-      sub: "Boarding area G", dur: 11, mode: "walk",
-      source: "SFO map", detail: "0.4 mi · moving walkways" },
+    { id: "ride", phase: "depart", icon: "local_taxi", title: "Uber to LAX",
+      sub: "Toyota Camry · pickup 6 min", dur: 28, mode: "ride", tz: TZ.PDT,
+      source: "Uber", detail: "Downtown LA → TBIT (Terminal B)", live: true, feed: "traffic",
+      from: { lat: 34.0522, lng: -118.2437 }, to: { lat: 33.9416, lng: -118.4085 } },
+    { id: "curb", phase: "depart", icon: "directions_walk", title: "Curb → check-in",
+      sub: "Tom Bradley Intl (Terminal B)", dur: 8, mode: "walk", tz: TZ.PDT,
+      source: "LAX map", detail: "Departures level → Korean Air row" },
+    { id: "checkin", phase: "depart", icon: "badge", title: "Check-in & bag drop",
+      sub: "Korean Air · SkyPriority", dur: 22, mode: "queue", tz: TZ.PDT,
+      source: "Intl bag-drop cutoff", detail: "Intl counters close 60 min before departure" },
+    { id: "security", phase: "depart", icon: "security", title: "Security",
+      sub: "TSA PreCheck — TBIT", dur: 17, mode: "queue", tz: TZ.PDT,
+      source: "TSA wait feed", detail: "TBIT checkpoint · 17 min", live: true, feed: "security_wait" },
+    { id: "gateLAX", phase: "depart", icon: "directions_walk", title: "Walk to gate",
+      sub: "TBIT boarding area", dur: 12, mode: "walk", tz: TZ.PDT,
+      source: "LAX map", detail: "Concourse walk to KE012 gate" },
   ],
-  flight: {
-    id: "flight", phase: "air", icon: "flight", code: "UA857", carrier: "United",
-    from: "SFO", to: "PVG", fromCity: "San Francisco", toCity: "Shanghai Pudong",
-    termFrom: "Intl G", termTo: "T2", seat: "14K", gate: "G98",
-  },
+
+  flights: [
+    { id: "KE012", code: "KE012", carrier: "Korean Air", aircraft: "A380-800",
+      fromCode: "LAX", fromCity: "Los Angeles", fromTerm: "Terminal B", fromTz: TZ.PDT,
+      toCode: "ICN", toCity: "Seoul Incheon", toTerm: "T2", toTz: TZ.KST,
+      departUtc: isoToUtcMin("2026-06-20T23:50:00-07:00"),
+      arriveUtc: isoToUtcMin("2026-06-22T05:00:00+09:00"),
+      seat: "53K", feed: "flight_status" },
+    { id: "KE863", code: "KE863", carrier: "Korean Air", aircraft: "A330-300",
+      fromCode: "ICN", fromCity: "Seoul Incheon", fromTerm: "T2", fromTz: TZ.KST,
+      toCode: "PEK", toCity: "Beijing Shoudu", toTerm: "T2", toTz: TZ.CST,
+      departUtc: isoToUtcMin("2026-06-22T20:00:00+09:00"),
+      arriveUtc: isoToUtcMin("2026-06-22T21:30:00+08:00"),
+      seat: "32A", feed: "flight_status" },
+  ],
+
+  // ── connection at Seoul Incheon (stay airside; the 15h is the implicit gap) ──
+  connections: [
+    { id: "icn", airportCode: "ICN", city: "Seoul Incheon", term: "T2", tz: TZ.KST,
+      legs: [
+        { id: "deplaneICN", phase: "connection", icon: "airline_seat_recline_normal",
+          title: "Deplane KE012", sub: "ICN Terminal 2", dur: 10, mode: "walk", tz: TZ.KST,
+          source: "Avg wide-body", detail: "Door open → concourse" },
+        { id: "transferICN", phase: "connection", icon: "transfer_within_a_station",
+          title: "Transfer to KE863 gate", sub: "Same terminal (T2)", dur: 15, mode: "walk", tz: TZ.KST,
+          source: "ICN map", detail: "Airside transfer · no re-entry" },
+      ] },
+  ],
+
+  // ── arrival side (Beijing PEK, international → city) ──
   post: [
-    { id: "deplane", phase: "cn", icon: "airline_seat_recline_normal", title: "Deplane & taxi to gate",
-      sub: "PVG Terminal 2", dur: 9, mode: "walk",
-      source: "Avg wide-body", detail: "Door open → jet bridge" },
-    { id: "immigration", phase: "cn", icon: "fingerprint", title: "Immigration",
-      sub: "Foreign passports", dur: 27, mode: "queue",
-      source: "PVG queue feed", detail: "e-Channel not eligible · 27 min", live: true, feed: "immigration_wait" },
-    { id: "baggage", phase: "cn", icon: "luggage", title: "Baggage claim",
-      sub: "Carousel 14", dur: 16, mode: "queue",
-      source: "Belt estimate", detail: "First bags ~16 min after land", live: true, feed: "baggage_estimate" },
-    { id: "customs", phase: "cn", icon: "inventory_2", title: "Customs",
-      sub: "Nothing to declare", dur: 5, mode: "queue",
+    { id: "deplanePEK", phase: "arrive", icon: "airline_seat_recline_normal", title: "Deplane & taxi to gate",
+      sub: "PEK Terminal 2", dur: 10, mode: "walk", tz: TZ.CST,
+      source: "Avg narrow-body", detail: "Door open → jet bridge" },
+    { id: "immigration", phase: "arrive", icon: "fingerprint", title: "Immigration",
+      sub: "Foreign passports", dur: 30, mode: "queue", tz: TZ.CST,
+      source: "PEK queue feed", detail: "Foreign-passport hall · 30 min", live: true, feed: "immigration_wait" },
+    { id: "baggage", phase: "arrive", icon: "luggage", title: "Baggage claim",
+      sub: "Carousel — KE863", dur: 18, mode: "queue", tz: TZ.CST,
+      source: "Belt estimate", detail: "First bags ~18 min after land", live: true, feed: "baggage_estimate" },
+    { id: "customs", phase: "arrive", icon: "inventory_2", title: "Customs",
+      sub: "Nothing to declare", dur: 6, mode: "queue", tz: TZ.CST,
       source: "Green channel", detail: "Usually walk-through" },
-    { id: "didi", phase: "cn", icon: "local_taxi", title: "Didi to city",
-      sub: "Pickup zone P7", dur: 6, mode: "ride",
-      source: "Didi", detail: "6 min wait · Express", live: true, feed: "traffic" },
-    { id: "drive", phase: "cn", icon: "directions_car", title: "Drive to Lujiazui",
-      sub: "S20 → Yan’an E. Tunnel", dur: 22, mode: "ride",
-      source: "AMap traffic", detail: "38 km · moderate flow", live: true, feed: "traffic" },
-    { id: "walkCN", phase: "cn", icon: "directions_walk", title: "Walk to meeting",
-      sub: "Shanghai IFC · Tower 2, 8F", dur: 6, mode: "walk",
-      source: "Building map", detail: "Lobby → client floor" },
+    { id: "didi", phase: "arrive", icon: "local_taxi", title: "Didi pickup",
+      sub: "Ground transport · zone 2", dur: 8, mode: "ride", tz: TZ.CST,
+      source: "Didi", detail: "8 min wait · Express", live: true, feed: "traffic" },
+    { id: "drive", phase: "arrive", icon: "directions_car", title: "Drive to Beijing CBD",
+      sub: "Airport Expwy → Guomao", dur: 45, mode: "ride", tz: TZ.CST,
+      source: "Maps traffic", detail: "~32 km · moderate flow", live: true, feed: "traffic",
+      from: { lat: 40.0799, lng: 116.6031 }, to: { lat: 39.9085, lng: 116.4575 } },
+    { id: "walkPEK", phase: "arrive", icon: "directions_walk", title: "Walk to destination",
+      sub: "Guomao · Beijing CBD", dur: 6, mode: "walk", tz: TZ.CST,
+      source: "Building map", detail: "Drop-off → entrance" },
   ],
-  meeting: {
-    title: "Q3 partnership review",
-    org: "Lanson Group",
-    place: "Shanghai IFC · Tower 2, 8F",
-    time: 14 * 60,
-    tz: "CST",
-  },
+
+  boardLeadMin: 45, // international boarding starts ~45 min before departure
+  gateCushionMin: 30, // target buffer at the gate before boarding
+  minConnectionMin: 90, // minimum viable international connection
+  deadlineUtc: null, // ETA-only: no hard deadline
 };

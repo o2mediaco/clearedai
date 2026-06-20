@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Cleared — door to door, gate to meeting",
-  description: "Autonomous, multi-agent travel co-pilot. Gemma orchestrates real-time door-to-door tracking.",
+  title: "Cleared — live door-to-door arrival tracking",
+  description: "Autonomous multi-agent travel co-pilot. Gemma orchestrates real-time door-to-door tracking across flights, layovers, and the ride to your destination.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

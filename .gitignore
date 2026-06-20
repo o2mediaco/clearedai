@@ -1,3 +1,28 @@
-app/_shots/
-*.log
+# dependencies
+/node_modules
+
+# next.js
+/.next/
+/out/
+
+# production
+/build
+
+# misc
 .DS_Store
+*.log
+
+# env
+.env
+.env*.local
+
+# prototype screenshots (design reference)
+prototype/_shots/
+
+# typescript
+next-env.d.ts
+*.tsbuildinfo
+
+# stray copy artifacts (never commit — may contain secrets)
+*copy*.example
+* copy*

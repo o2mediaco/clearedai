@@ -130,11 +130,11 @@ function ConnectionBlock({ c, t }: { c: ComputedConnection; t: Theme }) {
   );
 }
 
-export default function Timeline({ s, t, changedSet, trip }: { s: Schedule; t: Theme; changedSet: Set<string>; trip: Trip }) {
+export default function Timeline({ s, t, changedSet, trip, wide }: { s: Schedule; t: Theme; changedSet: Set<string>; trip: Trip; wide: boolean }) {
   const [open, setOpen] = React.useState<string | null>(null);
   const toggle = (id: string) => setOpen(open === id ? null : id);
   return (
-    <div style={{ padding: `12px ${t.pad}px 30px` }}>
+    <div style={{ padding: wide ? 0 : `12px ${t.pad}px 30px` }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
         <div>
           <div style={{ fontFamily: t.display, fontWeight: 600, fontSize: 21, color: t.text }}>Door to door</div>

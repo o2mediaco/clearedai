@@ -4,13 +4,12 @@
 html,
 body {
   margin: 0;
-  height: 100%;
+  min-height: 100%;
   background: #070a09;
 }
 body {
   font-family: "Manrope", sans-serif;
   -webkit-font-smoothing: antialiased;
-  overflow: hidden;
 }
 .msym {
   font-family: "Material Symbols Rounded";
@@ -27,19 +26,13 @@ body {
   -webkit-font-feature-settings: "liga";
   -moz-font-feature-settings: "liga";
 }
-#stage {
-  position: fixed;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-::-webkit-scrollbar {
-  width: 0;
-  height: 0;
-}
+/* hide scrollbar on scroll regions but keep scrolling */
 .scrollarea {
   scrollbar-width: none;
+}
+.scrollarea::-webkit-scrollbar {
+  width: 0;
+  height: 0;
 }
 @keyframes cl-pulse {
   0% {

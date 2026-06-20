@@ -26,3 +26,7 @@ next-env.d.ts
 # stray copy artifacts (never commit — may contain secrets)
 *copy*.example
 * copy*
+
+# playwright test artifacts
+.playwright-mcp/
+*.jpeg

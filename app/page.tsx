@@ -1,16 +1,37 @@
 "use client";
 
 import React, { useCallback, useEffect, useState } from "react";
-import { makeTheme, Sym, type Theme } from "@/components/ui";
+import { makeTheme, Sym, StatusDot, type Theme } from "@/components/ui";
 import Today from "@/components/screens/Today";
 import Timeline from "@/components/screens/Timeline";
 import Live, { type AlertEntry } from "@/components/screens/Live";
-import { computeSchedule, freshOverrides, fmtTime } from "@/lib/schedule";
+import { computeSchedule, freshOverrides, fmtTime, fmtDur } from "@/lib/schedule";
 import { SEED_TRIP } from "@/lib/trip";
-import type { Overrides, Tab, PipelineTrace, AgentTickResponse, Tz } from "@/lib/types";
+import type { Overrides, Tab, PipelineTrace, AgentTickResponse, Schedule } from "@/lib/types";
 
 const ACCENT = "#4f8cff";
 const MAX_TICKS = 4;
+const DESKTOP_BP = 1024;
+
+const NAV: { id: Tab; icon: string; label: string }[] = [
+  { id: "today", icon: "home", label: "Today" },
+  { id: "timeline", icon: "checklist", label: "Timeline" },
+  { id: "live", icon: "notifications", label: "Live" },
+];
+
+/** Viewport hook with SSR-safe mounting (avoids hydration mismatch). */
+function useViewport() {
+  const [w, setW] = useState(0);
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    const on = () => setW(window.innerWidth);
+    on();
+    setMounted(true);
+    window.addEventListener("resize", on);
+    return () => window.removeEventListener("resize", on);
+  }, []);
+  return { w, mounted, isDesktop: w >= DESKTOP_BP };
+}
 
 function useNow(startUtc: number) {
   const [sec, setSec] = useState(0);
@@ -21,40 +42,92 @@ function useNow(startUtc: number) {
   return startUtc + Math.floor(sec / 30);
 }
 
-function useFit(w: number, h: number) {
-  const [scale, setScale] = useState(1);
-  useEffect(() => {
-    const fit = () => setScale(Math.min(1, (window.innerHeight - 24) / h, (window.innerWidth - 24) / w));
-    fit();
-    window.addEventListener("resize", fit);
-    return () => window.removeEventListener("resize", fit);
-  }, [w, h]);
-  return scale;
-}
-
-function StatusBar({ t, nowUtc, tz }: { t: Theme; nowUtc: number; tz: Tz }) {
+function Brand({ t, compact = false }: { t: Theme; compact?: boolean }) {
   return (
-    <div style={{ height: 42, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 20px", position: "relative", flexShrink: 0 }}>
-      <span style={{ fontFamily: t.mono, fontSize: 13, fontWeight: 600, color: t.text }}>{fmtTime(nowUtc, tz)}</span>
-      <div style={{ position: "absolute", left: "50%", top: 9, transform: "translateX(-50%)", width: 11, height: 11, borderRadius: 99, background: "#05080700", boxShadow: "inset 0 0 0 2px #000" }} />
-      <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-        <Sym name="signal_cellular_alt" size={16} color={t.text} fill={1} />
-        <Sym name="wifi" size={16} color={t.text} fill={1} />
-        <Sym name="battery_5_bar" size={17} color={t.text} fill={1} style={{ transform: "rotate(90deg)" }} />
+    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+      <div style={{ width: 32, height: 32, borderRadius: 9, background: t.accent, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+        <Sym name="bolt" size={20} color="#06140d" fill={1} />
+      </div>
+      <div style={{ lineHeight: 1.05 }}>
+        <div style={{ fontFamily: t.display, fontWeight: 700, fontSize: 16, color: t.text }}>Cleared</div>
+        {!compact && <div style={{ fontFamily: t.mono, fontSize: 10, color: t.faint, letterSpacing: 1 }}>TRAVEL AI</div>}
       </div>
     </div>
   );
 }
 
-function BottomNav({ t, tab, go, alert }: { t: Theme; tab: Tab; go: (x: Tab) => void; alert: number }) {
-  const items: { id: Tab; icon: string; label: string }[] = [
-    { id: "today", icon: "home", label: "Today" },
-    { id: "timeline", icon: "checklist", label: "Timeline" },
-    { id: "live", icon: "notifications", label: "Live" },
-  ];
+function TripChip({ t, trip }: { t: Theme; trip: typeof SEED_TRIP }) {
   return (
-    <div style={{ flexShrink: 0, display: "flex", padding: "6px 8px 4px", borderTop: `1px solid ${t.line}`, background: t.bgTop }}>
-      {items.map((it) => {
+    <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+      <span style={{ fontFamily: t.mono, fontSize: 12.5, fontWeight: 600, color: t.text }}>{trip.origin.code}</span>
+      <Sym name="trending_flat" size={14} color={t.faint} />
+      {trip.connections.map((c) => (
+        <React.Fragment key={c.id}>
+          <span style={{ fontFamily: t.mono, fontSize: 11.5, color: t.dim }}>{c.airportCode}</span>
+          <Sym name="trending_flat" size={14} color={t.faint} />
+        </React.Fragment>
+      ))}
+      <span style={{ fontFamily: t.mono, fontSize: 12.5, fontWeight: 600, color: t.text }}>{trip.destination.code}</span>
+    </div>
+  );
+}
+
+function Sidebar({ t, tab, go, alert, s, engine }: { t: Theme; tab: Tab; go: (x: Tab) => void; alert: number; s: Schedule; engine: "gemma" | "mock" | null }) {
+  return (
+    <aside style={{ width: 264, flexShrink: 0, height: "100dvh", position: "sticky", top: 0, display: "flex", flexDirection: "column", padding: "24px 16px", borderRight: `1px solid ${t.line}`, background: t.bgTop, gap: 22 }}>
+      <Brand t={t} />
+      <div style={{ padding: "12px 12px", borderRadius: t.radiusSm, background: t.surface, border: `1px solid ${t.line}` }}>
+        <div style={{ fontFamily: t.mono, fontSize: 9.5, letterSpacing: 1.2, color: t.faint, marginBottom: 7 }}>ITINERARY</div>
+        <TripChip t={t} trip={SEED_TRIP} />
+      </div>
+
+      <nav style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+        {NAV.map((it) => {
+          const active = tab === it.id;
+          return (
+            <button key={it.id} onClick={() => go(it.id)} style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 12px", borderRadius: t.radiusSm, border: "none", cursor: "pointer", background: active ? t.accent + "1f" : "transparent", color: active ? t.text : t.dim, textAlign: "left", width: "100%", transition: "background .15s" }}>
+              <Sym name={it.icon} size={21} color={active ? t.accent : t.dim} fill={active ? 1 : 0} />
+              <span style={{ fontFamily: t.body, fontWeight: active ? 700 : 600, fontSize: 14 }}>{it.label}</span>
+              {it.id === "live" && alert > 0 && (
+                <span style={{ marginLeft: "auto", minWidth: 18, height: 18, padding: "0 5px", borderRadius: 99, background: t.red, color: "#fff", fontFamily: t.mono, fontSize: 10, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center" }}>{alert}</span>
+              )}
+            </button>
+          );
+        })}
+      </nav>
+
+      <div style={{ marginTop: "auto", padding: 14, borderRadius: t.radius, background: `linear-gradient(160deg, ${t.surface2}, ${t.surface})`, border: `1px solid ${s.status.color}33` }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontFamily: t.body, fontWeight: 700, fontSize: 12, color: s.status.color }}>
+            <StatusDot color={s.status.color} pulse /> {s.status.label}
+          </span>
+          <span style={{ fontFamily: t.mono, fontSize: 9, color: engine === "gemma" ? t.accent : t.faint }}>{engine === "gemma" ? "● Gemma" : engine === "mock" ? "○ mock" : "idle"}</span>
+        </div>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginTop: 8 }}>
+          <span style={{ fontFamily: t.display, fontWeight: 600, fontSize: 24, color: t.text }}>{fmtTime(s.arriveUtc, SEED_TRIP.destination.tz)}</span>
+          <span style={{ fontFamily: t.body, fontSize: 11, color: t.dim }}>ETA {SEED_TRIP.destination.code}</span>
+        </div>
+        <div style={{ fontFamily: t.mono, fontSize: 11, color: t.faint, marginTop: 3 }}>{s.slip <= 0 ? "on schedule" : `+${fmtDur(s.slip)} vs plan`}</div>
+      </div>
+    </aside>
+  );
+}
+
+function MobileHeader({ t, s }: { t: Theme; s: Schedule }) {
+  return (
+    <header style={{ flexShrink: 0, height: 56, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 16px", borderBottom: `1px solid ${t.line}`, background: t.bgTop }}>
+      <Brand t={t} compact />
+      <span style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "5px 11px", borderRadius: 99, background: s.status.soft, color: s.status.color, fontFamily: t.body, fontWeight: 700, fontSize: 12 }}>
+        <StatusDot color={s.status.color} pulse /> {fmtTime(s.arriveUtc, SEED_TRIP.destination.tz)}
+      </span>
+    </header>
+  );
+}
+
+function BottomNav({ t, tab, go, alert }: { t: Theme; tab: Tab; go: (x: Tab) => void; alert: number }) {
+  return (
+    <nav style={{ flexShrink: 0, display: "flex", padding: "6px 8px", paddingBottom: "max(6px, env(safe-area-inset-bottom))", borderTop: `1px solid ${t.line}`, background: t.bgTop }}>
+      {NAV.map((it) => {
         const active = tab === it.id;
         return (
           <button key={it.id} onClick={() => go(it.id)} style={{ flex: 1, border: "none", cursor: "pointer", background: "transparent", display: "flex", flexDirection: "column", alignItems: "center", gap: 4, padding: "6px 0" }}>
@@ -68,12 +141,13 @@ function BottomNav({ t, tab, go, alert }: { t: Theme; tab: Tab; go: (x: Tab) => 
           </button>
         );
       })}
-    </div>
+    </nav>
   );
 }
 
 export default function Page() {
   const t = makeTheme({ accent: ACCENT, vibe: "calm" });
+  const { mounted, isDesktop } = useViewport();
   const [tab, setTab] = useState<Tab>("today");
   const [overrides, setOverrides] = useState<Overrides>(freshOverrides());
   const [tick, setTick] = useState(0);
@@ -86,11 +160,6 @@ export default function Page() {
 
   const schedule = computeSchedule(SEED_TRIP, overrides);
   const nowUtc = useNow(schedule.leaveByUtc - 75);
-  const scale = useFit(412, 892);
-
-  const changedSet = new Set<string>();
-  for (const [k, v] of Object.entries(overrides.flightDelay)) if (v !== 0) changedSet.add(k);
-  for (const [k, v] of Object.entries(overrides.dur)) if (v !== 0) changedSet.add(k);
 
   const go = (x: Tab) => setTab(x);
 
@@ -99,35 +168,16 @@ export default function Page() {
     setError(null);
     const next = tick + 1;
     try {
-      const res = await fetch("/api/agent/tick", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ overrides, tick: next }),
-      });
+      const res = await fetch("/api/agent/tick", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ overrides, tick: next }) });
       const data: AgentTickResponse & { error?: string } = await res.json();
-      if (data.error) {
-        setError(data.error);
-        return;
-      }
+      if (data.error) { setError(data.error); return; }
       setOverrides(data.overrides);
       setTick(next);
       setEngine(data.engine);
       setModel(data.model ?? "");
       setPipeline(data.pipeline);
       if (data.alert) {
-        setAlerts((prev) => [
-          ...prev,
-          {
-            id: next,
-            title: data.alert!.title,
-            body: data.alert!.body,
-            severity: data.alert!.severity,
-            time: fmtTime(nowUtc + next * 30, SEED_TRIP.origin.tz),
-            slipBefore: data.slipBefore,
-            slipAfter: data.slipAfter,
-            color: data.status.color,
-          },
-        ]);
+        setAlerts((prev) => [...prev, { id: next, title: data.alert!.title, body: data.alert!.body, severity: data.alert!.severity, time: fmtTime(nowUtc + next * 30, SEED_TRIP.origin.tz), slipBefore: data.slipBefore, slipAfter: data.slipAfter, color: data.status.color }]);
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "request failed");
@@ -146,33 +196,54 @@ export default function Page() {
     setError(null);
   }, []);
 
-  let screen: React.ReactNode;
-  if (tab === "today") screen = <Today s={schedule} t={t} nowUtc={nowUtc} go={go} trip={SEED_TRIP} />;
-  else if (tab === "timeline") screen = <Timeline s={schedule} t={t} changedSet={changedSet} trip={SEED_TRIP} />;
-  else
-    screen = (
-      <Live s={schedule} t={t} trip={SEED_TRIP} tick={tick} loading={loading} engine={engine} model={model} pipeline={pipeline} alerts={alerts} onTick={onTick} onReset={onReset} maxTicks={MAX_TICKS} />
-    );
+  const wide = mounted && isDesktop;
 
-  return (
-    <div id="stage">
-      <div style={{ width: 412, height: 892, transform: `scale(${scale})`, transformOrigin: "center", borderRadius: 46, padding: 9, background: "linear-gradient(160deg,#23312a,#0d1411)", boxShadow: "0 40px 110px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.04)" }}>
-        <div style={{ width: "100%", height: "100%", borderRadius: 38, overflow: "hidden", display: "flex", flexDirection: "column", background: `radial-gradient(120% 60% at 50% 0%, ${t.bgTop}, ${t.bg} 60%)` }}>
-          <StatusBar t={t} nowUtc={nowUtc} tz={SEED_TRIP.origin.tz} />
-          <div className="scrollarea" key={tab} style={{ flex: 1, overflowY: "auto", overflowX: "hidden" }}>
-            {error && (
-              <div style={{ margin: `8px ${t.pad}px`, padding: 12, borderRadius: 12, background: t.red + "1e", border: `1px solid ${t.red}55`, fontFamily: t.body, fontSize: 12.5, color: t.red }}>
-                Agent error: {error}
-              </div>
-            )}
-            {screen}
-          </div>
-          <BottomNav t={t} tab={tab} go={go} alert={alerts.length} />
-          <div style={{ height: 22, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, background: t.bgTop }}>
-            <div style={{ width: 130, height: 5, borderRadius: 99, background: "rgba(255,255,255,0.22)" }} />
-          </div>
-        </div>
-      </div>
+  let screen: React.ReactNode;
+  if (tab === "today") screen = <Today s={schedule} t={t} nowUtc={nowUtc} go={go} trip={SEED_TRIP} wide={wide} />;
+  else if (tab === "timeline") screen = <Timeline s={schedule} t={t} changedSet={changedSetOf(overrides)} trip={SEED_TRIP} wide={wide} />;
+  else screen = <Live s={schedule} t={t} trip={SEED_TRIP} tick={tick} loading={loading} engine={engine} model={model} pipeline={pipeline} alerts={alerts} onTick={onTick} onReset={onReset} maxTicks={MAX_TICKS} wide={wide} />;
+
+  const maxWidth = tab === "timeline" ? 660 : 1000;
+  const errBanner = error && (
+    <div style={{ margin: wide ? "0 0 16px" : `8px ${t.pad}px`, padding: 12, borderRadius: 12, background: t.red + "1e", border: `1px solid ${t.red}55`, fontFamily: t.body, fontSize: 12.5, color: t.red }}>
+      Agent error: {error}
     </div>
   );
+
+  // First paint (pre-mount): neutral container to avoid hydration mismatch.
+  const baseRoot: React.CSSProperties = { minHeight: "100dvh", background: `radial-gradient(120% 60% at 50% 0%, ${t.bgTop}, ${t.bg} 55%)`, color: t.text };
+
+  if (!mounted) return <div style={baseRoot} />;
+
+  if (wide) {
+    return (
+      <div style={{ ...baseRoot, height: "100dvh", display: "flex", flexDirection: "row" }}>
+        <Sidebar t={t} tab={tab} go={go} alert={alerts.length} s={schedule} engine={engine} />
+        <main className="scrollarea" style={{ flex: 1, overflowY: "auto", height: "100dvh" }}>
+          <div style={{ maxWidth, margin: "0 auto", width: "100%", padding: "32px 28px 64px" }}>
+            {errBanner}
+            {screen}
+          </div>
+        </main>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ ...baseRoot, height: "100dvh", display: "flex", flexDirection: "column" }}>
+      <MobileHeader t={t} s={schedule} />
+      <main className="scrollarea" style={{ flex: 1, overflowY: "auto", overflowX: "hidden" }}>
+        {errBanner}
+        {screen}
+      </main>
+      <BottomNav t={t} tab={tab} go={go} alert={alerts.length} />
+    </div>
+  );
+}
+
+function changedSetOf(overrides: Overrides): Set<string> {
+  const set = new Set<string>();
+  for (const [k, v] of Object.entries(overrides.flightDelay)) if (v !== 0) set.add(k);
+  for (const [k, v] of Object.entries(overrides.dur)) if (v !== 0) set.add(k);
+  return set;
 }

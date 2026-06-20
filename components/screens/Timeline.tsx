@@ -25,7 +25,12 @@ function LegRow({ leg, t, color, changed, expanded, onToggle }: { leg: ComputedL
             <div style={{ fontFamily: t.body, fontSize: 12, color: t.dim, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{leg.sub}</div>
           </div>
           <div style={{ textAlign: "right", flexShrink: 0 }}>
-            <div style={{ fontFamily: t.mono, fontSize: 13, color: t.text, fontWeight: 600 }}>{fmtDur(leg.dur)}</div>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 6 }}>
+              {leg.id === "ride" && leg.live && (
+                <span style={{ fontFamily: t.mono, fontSize: 8.5, fontWeight: 700, letterSpacing: 0.6, color: changed ? t.amber : t.green, background: (changed ? t.amber : t.green) + "1e", padding: "1px 5px", borderRadius: 5 }}>LIVE</span>
+              )}
+              <div style={{ fontFamily: t.mono, fontSize: 13, color: t.text, fontWeight: 600 }}>{fmtDur(leg.dur)}</div>
+            </div>
             <div style={{ fontFamily: t.mono, fontSize: 11, color: t.faint, marginTop: 2 }}>{fmtTime(leg.startUtc, leg.tz)}</div>
           </div>
         </div>

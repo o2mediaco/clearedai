@@ -13,9 +13,9 @@ export const SEED_TRIP: Trip = {
   // ── departure side (LAX, international, checked bag, TSA PreCheck) ──
   pre: [
     { id: "ride", phase: "depart", icon: "local_taxi", title: "Uber to LAX",
-      sub: "Toyota Camry · pickup 6 min", dur: 28, mode: "ride", tz: TZ.PDT,
-      source: "Uber", detail: "Downtown LA → TBIT (Terminal B)", live: true, feed: "traffic",
-      from: { lat: 34.0522, lng: -118.2437 }, to: { lat: 33.9416, lng: -118.4085 } },
+      sub: "Newport Beach → LAX", dur: 70, mode: "ride", tz: TZ.PDT,
+      source: "Google Routes", detail: "Live traffic · 2807 Villa Way → LAX", live: true, feed: "traffic",
+      from: { lat: 33.6080, lng: -117.9290 }, to: { lat: 33.9416, lng: -118.4085 } },
     { id: "curb", phase: "depart", icon: "directions_walk", title: "Curb → check-in",
       sub: "Tom Bradley Intl (Terminal B)", dur: 8, mode: "walk", tz: TZ.PDT,
       source: "LAX map", detail: "Departures level → Korean Air row" },

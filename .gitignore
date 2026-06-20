@@ -30,3 +30,6 @@ next-env.d.ts
 # playwright test artifacts
 .playwright-mcp/
 *.jpeg
+
+# user-dropped reference images
+/image.png

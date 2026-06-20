@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { makeTheme, Sym, StatusDot, type Theme } from "@/components/ui";
 import Today from "@/components/screens/Today";
 import Timeline from "@/components/screens/Timeline";
@@ -72,13 +72,13 @@ function TripChip({ t, trip }: { t: Theme; trip: typeof SEED_TRIP }) {
   );
 }
 
-function Sidebar({ t, tab, go, alert, s, engine }: { t: Theme; tab: Tab; go: (x: Tab) => void; alert: number; s: Schedule; engine: "gemma" | "mock" | null }) {
+function Sidebar({ t, tab, go, alert, s, engine, trip }: { t: Theme; tab: Tab; go: (x: Tab) => void; alert: number; s: Schedule; engine: "gemma" | "mock" | null; trip: typeof SEED_TRIP }) {
   return (
     <aside style={{ width: 264, flexShrink: 0, height: "100dvh", position: "sticky", top: 0, display: "flex", flexDirection: "column", padding: "24px 16px", borderRight: `1px solid ${t.line}`, background: t.bgTop, gap: 22 }}>
       <Brand t={t} />
       <div style={{ padding: "12px 12px", borderRadius: t.radiusSm, background: t.surface, border: `1px solid ${t.line}` }}>
         <div style={{ fontFamily: t.mono, fontSize: 9.5, letterSpacing: 1.2, color: t.faint, marginBottom: 7 }}>ITINERARY</div>
-        <TripChip t={t} trip={SEED_TRIP} />
+        <TripChip t={t} trip={trip} />
       </div>
 
       <nav style={{ display: "flex", flexDirection: "column", gap: 4 }}>
@@ -104,8 +104,8 @@ function Sidebar({ t, tab, go, alert, s, engine }: { t: Theme; tab: Tab; go: (x:
           <span style={{ fontFamily: t.mono, fontSize: 9, color: engine === "gemma" ? t.accent : t.faint }}>{engine === "gemma" ? "● Gemma" : engine === "mock" ? "○ mock" : "idle"}</span>
         </div>
         <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginTop: 8 }}>
-          <span style={{ fontFamily: t.display, fontWeight: 600, fontSize: 24, color: t.text }}>{fmtTime(s.arriveUtc, SEED_TRIP.destination.tz)}</span>
-          <span style={{ fontFamily: t.body, fontSize: 11, color: t.dim }}>ETA {SEED_TRIP.destination.code}</span>
+          <span style={{ fontFamily: t.display, fontWeight: 600, fontSize: 24, color: t.text }}>{fmtTime(s.arriveUtc, trip.destination.tz)}</span>
+          <span style={{ fontFamily: t.body, fontSize: 11, color: t.dim }}>ETA {trip.destination.code}</span>
         </div>
         <div style={{ fontFamily: t.mono, fontSize: 11, color: t.faint, marginTop: 3 }}>{s.slip <= 0 ? "on schedule" : `+${fmtDur(s.slip)} vs plan`}</div>
       </div>
@@ -113,12 +113,12 @@ function Sidebar({ t, tab, go, alert, s, engine }: { t: Theme; tab: Tab; go: (x:
   );
 }
 
-function MobileHeader({ t, s }: { t: Theme; s: Schedule }) {
+function MobileHeader({ t, s, trip }: { t: Theme; s: Schedule; trip: typeof SEED_TRIP }) {
   return (
     <header style={{ flexShrink: 0, height: 56, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 16px", borderBottom: `1px solid ${t.line}`, background: t.bgTop }}>
       <Brand t={t} compact />
       <span style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "5px 11px", borderRadius: 99, background: s.status.soft, color: s.status.color, fontFamily: t.body, fontWeight: 700, fontSize: 12 }}>
-        <StatusDot color={s.status.color} pulse /> {fmtTime(s.arriveUtc, SEED_TRIP.destination.tz)}
+        <StatusDot color={s.status.color} pulse /> {fmtTime(s.arriveUtc, trip.destination.tz)}
       </span>
     </header>
   );
@@ -157,8 +157,37 @@ export default function Page() {
   const [model, setModel] = useState<string>("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [liveRideMin, setLiveRideMin] = useState<number | null>(null);
 
-  const schedule = computeSchedule(SEED_TRIP, overrides);
+  // Pull live Google Routes traffic for the "Uber to LAX" pre-flight leg once on mount.
+  useEffect(() => {
+    fetch("/api/traffic")
+      .then((r) => r.json())
+      .then((d) => {
+        if (typeof d.ride === "number") setLiveRideMin(d.ride);
+      })
+      .catch(() => {});
+  }, []);
+
+  // Display trip: bake the live ride minutes into the TRIP'S BASE duration.
+  // The ride is a pre-flight leg, so this only shifts "Leave by" — never the
+  // arrival ETA or slip. The agent server keeps its own SEED_TRIP (unaffected).
+  const trip = useMemo(
+    () =>
+      liveRideMin == null
+        ? SEED_TRIP
+        : {
+            ...SEED_TRIP,
+            pre: SEED_TRIP.pre.map((l) =>
+              l.id === "ride"
+                ? { ...l, dur: liveRideMin, detail: `Live traffic · ~${liveRideMin} min to LAX` }
+                : l
+            ),
+          },
+    [liveRideMin]
+  );
+
+  const schedule = computeSchedule(trip, overrides);
   const nowUtc = useNow(schedule.leaveByUtc - 75);
 
   const go = (x: Tab) => setTab(x);
@@ -177,14 +206,14 @@ export default function Page() {
       setModel(data.model ?? "");
       setPipeline(data.pipeline);
       if (data.alert) {
-        setAlerts((prev) => [...prev, { id: next, title: data.alert!.title, body: data.alert!.body, severity: data.alert!.severity, time: fmtTime(nowUtc + next * 30, SEED_TRIP.origin.tz), slipBefore: data.slipBefore, slipAfter: data.slipAfter, color: data.status.color }]);
+        setAlerts((prev) => [...prev, { id: next, title: data.alert!.title, body: data.alert!.body, severity: data.alert!.severity, time: fmtTime(nowUtc + next * 30, trip.origin.tz), slipBefore: data.slipBefore, slipAfter: data.slipAfter, color: data.status.color }]);
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "request failed");
     } finally {
       setLoading(false);
     }
-  }, [overrides, tick, nowUtc]);
+  }, [overrides, tick, nowUtc, trip]);
 
   const onReset = useCallback(() => {
     setOverrides(freshOverrides());
@@ -199,9 +228,9 @@ export default function Page() {
   const wide = mounted && isDesktop;
 
   let screen: React.ReactNode;
-  if (tab === "today") screen = <Today s={schedule} t={t} nowUtc={nowUtc} go={go} trip={SEED_TRIP} wide={wide} />;
-  else if (tab === "timeline") screen = <Timeline s={schedule} t={t} changedSet={changedSetOf(overrides)} trip={SEED_TRIP} wide={wide} />;
-  else screen = <Live s={schedule} t={t} trip={SEED_TRIP} tick={tick} loading={loading} engine={engine} model={model} pipeline={pipeline} alerts={alerts} onTick={onTick} onReset={onReset} maxTicks={MAX_TICKS} wide={wide} />;
+  if (tab === "today") screen = <Today s={schedule} t={t} nowUtc={nowUtc} go={go} trip={trip} wide={wide} />;
+  else if (tab === "timeline") screen = <Timeline s={schedule} t={t} changedSet={changedSetOf(overrides)} trip={trip} wide={wide} />;
+  else screen = <Live s={schedule} t={t} trip={trip} tick={tick} loading={loading} engine={engine} model={model} pipeline={pipeline} alerts={alerts} onTick={onTick} onReset={onReset} maxTicks={MAX_TICKS} wide={wide} />;
 
   const maxWidth = tab === "timeline" ? 660 : 1000;
   const errBanner = error && (
@@ -218,7 +247,7 @@ export default function Page() {
   if (wide) {
     return (
       <div style={{ ...baseRoot, height: "100dvh", display: "flex", flexDirection: "row" }}>
-        <Sidebar t={t} tab={tab} go={go} alert={alerts.length} s={schedule} engine={engine} />
+        <Sidebar t={t} tab={tab} go={go} alert={alerts.length} s={schedule} engine={engine} trip={trip} />
         <main className="scrollarea" style={{ flex: 1, overflowY: "auto", height: "100dvh" }}>
           <div style={{ maxWidth, margin: "0 auto", width: "100%", padding: "32px 28px 64px" }}>
             {errBanner}
@@ -231,7 +260,7 @@ export default function Page() {
 
   return (
     <div style={{ ...baseRoot, height: "100dvh", display: "flex", flexDirection: "column" }}>
-      <MobileHeader t={t} s={schedule} />
+      <MobileHeader t={t} s={schedule} trip={trip} />
       <main className="scrollarea" style={{ flex: 1, overflowY: "auto", overflowX: "hidden" }}>
         {errBanner}
         {screen}

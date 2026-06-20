@@ -33,15 +33,15 @@ function reading(
 export const FEEDS: FeedDef[] = [
   {
     id: "flight_status",
-    label: "Korean Air status",
-    description: "Departure delay (min) for KE012 (LAX→ICN) and KE863 (ICN→PEK).",
+    label: "Flight status",
+    description: "Departure delay (min) for KE012 (LAX→ICN) and OZ104 (ICN→NRT).",
     pollMock: (tick, ov) => {
       if (tick === 1 && (ov.flightDelay.KE012 || 0) !== 95)
         return [reading("flight_status", "flight", "KE012", 95, ov.flightDelay.KE012 || 0, "mock",
           "Korean Air KE012 (LAX→ICN) delayed 95 min — weather hold at LAX.")];
-      if (tick === 2 && (ov.flightDelay.KE863 || 0) !== 50)
-        return [reading("flight_status", "flight", "KE863", 50, ov.flightDelay.KE863 || 0, "mock",
-          "Korean Air KE863 (ICN→PEK) now departing 20:50 KST (+50 min).")];
+      if (tick === 2 && (ov.flightDelay.OZ104 || 0) !== 50)
+        return [reading("flight_status", "flight", "OZ104", 50, ov.flightDelay.OZ104 || 0, "mock",
+          "Asiana OZ104 (ICN→NRT) now departing 13:10 KST (+50 min).")];
       return [];
     },
     // FlightAware AeroAPI — https://www.flightaware.com/aeroapi/portal/documentation
@@ -87,12 +87,12 @@ export const FEEDS: FeedDef[] = [
   },
   {
     id: "immigration_wait",
-    label: "PEK immigration",
-    description: "Beijing foreign-passport hall wait delta (min) for the 'immigration' leg.",
+    label: "NRT immigration",
+    description: "Narita foreign-passport hall wait delta (min) for the 'immigration' leg.",
     pollMock: (tick, ov) =>
       tick === 3 && (ov.dur.immigration || 0) !== 20
         ? [reading("immigration_wait", "leg", "immigration", 20, ov.dur.immigration || 0, "mock",
-            "PEK foreign-passport hall now ~50 min (+20). Two desks just closed.")]
+            "NRT foreign-passport hall now ~45 min (+20). Two desks just closed.")]
         : [],
   },
   {
@@ -103,15 +103,15 @@ export const FEEDS: FeedDef[] = [
   },
   {
     id: "traffic",
-    label: "Beijing traffic",
-    description: "Drive + rideshare to Beijing CBD (writes legs 'drive' and 'didi').",
+    label: "Tokyo traffic",
+    description: "Drive + rideshare to central Tokyo (writes legs 'drive' and 'uber').",
     pollMock: (tick, ov) =>
       tick === 4 && (ov.dur.drive || 0) !== -25
         ? [
             reading("traffic", "leg", "drive", -25, ov.dur.drive || 0, "mock",
-              "Airport Expwy clears — drive to Guomao −25 min."),
-            reading("traffic", "leg", "didi", -5, ov.dur.didi || 0, "mock",
-              "Express Didi already at the curb — pickup −5 min."),
+              "Higashi-Kantō Expwy clears — drive to Shibuya −25 min."),
+            reading("traffic", "leg", "uber", -5, ov.dur.uber || 0, "mock",
+              "Uber already at the rideshare bay — pickup −5 min."),
           ]
         : [],
     // Google Routes API — traffic-aware drive time for legs with coordinates.

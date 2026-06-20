@@ -112,12 +112,13 @@ function mockComm(
   } else title = `${legName(trip, readings[0].target)} updated`;
 
   const actions = [] as CommOut["actions"];
+  const arrCode = trip.flights[trip.flights.length - 1].toCode;
   if (absorbed)
-    actions.push({ type: "calendar", label: "No action needed", detail: "Your 15h Seoul layover absorbs the delay; arrival is unchanged." });
+    actions.push({ type: "calendar", label: "No action needed", detail: "Your Seoul layover absorbs the delay; arrival is unchanged." });
   if (!absorbed && hasFlight)
-    actions.push({ type: "rideshare", label: "Re-time Beijing Didi", detail: `I'll shift your PEK pickup to match the new ${eta} arrival.` });
+    actions.push({ type: "rideshare", label: `Re-time ${trip.destination.city} Uber`, detail: `I'll shift your ${arrCode} pickup to match the new ${eta} arrival.` });
   if (readings.some((r) => r.target === "immigration"))
-    actions.push({ type: "message", label: "Message your contact", detail: `Draft: "PEK immigration is slow — I'll reach ${trip.destination.place} around ${eta}."` });
+    actions.push({ type: "message", label: "Message your contact", detail: `Draft: "${arrCode} immigration is slow — I'll reach ${trip.destination.place} around ${eta}."` });
   if (recovering)
     actions.push({ type: "calendar", label: "Keep current plan", detail: "Traffic cleared; no changes needed." });
 
@@ -183,7 +184,7 @@ export async function runTick(trip: Trip, overrides: Overrides, tick: number): P
     `${trip.flights.length - 1} stop(s). ETA-only (no hard deadline). Destination: ${trip.destination.place}.\n` +
     `Planned arrival: ${fmtTime(after.baselineArriveUtc, tz)} ${fmtDate(after.baselineArriveUtc, tz)} ${tz.label}.\n` +
     `Projected arrival now: ${fmtTime(after.arriveUtc, tz)} ${tz.label} (${slipText(after.slip)}). Was ${slipText(before.slip)} before these events.\n` +
-    `Note: a 15h layover at ICN can absorb upstream delays without affecting arrival.\n` +
+    `Note: the Seoul (ICN) layover can absorb upstream delays without affecting arrival.\n` +
     `New events:\n${events}\n` +
     `Available feeds: flight_status, security_wait, immigration_wait, baggage_estimate, traffic.`;
 
@@ -221,7 +222,7 @@ export async function runTick(trip: Trip, overrides: Overrides, tick: number): P
     const commCtx =
       analystCtx +
       `\nAnalyst: bottleneck=${analyst.bottleneck}; ${analyst.etaSummary}; risks=${analyst.risks.join("; ")}.\n` +
-      `Destination: ${trip.destination.place}. Rideshare legs: Uber (LAX), Didi (PEK).`;
+      `Destination: ${trip.destination.place}. Rideshare legs: Uber (LAX), Uber (${trip.flights[trip.flights.length - 1].toCode}).`;
     if (engine === "gemma") {
       try {
         comm = (await gemmaComm(commCtx)) ?? mockComm(trip, nextOv, readings, before.slip, after.slip);

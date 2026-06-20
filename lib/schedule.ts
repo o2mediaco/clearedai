@@ -20,6 +20,7 @@ const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "
 export const TZ: Record<string, Tz> = {
   PDT: { label: "PDT", offsetMin: -7 * 60 },
   KST: { label: "KST", offsetMin: 9 * 60 },
+  JST: { label: "JST", offsetMin: 9 * 60 }, // Japan Standard Time
   CST: { label: "CST", offsetMin: 8 * 60 }, // China Standard Time
 };
 

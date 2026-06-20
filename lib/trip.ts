@@ -1,14 +1,14 @@
-// trip.ts — the seed itinerary: LAX → ICN (KE012) → PEK (KE863), with a 15h
-// Seoul layover. ETA-only (no hard deadline). All flight anchors are real
+// trip.ts — the seed itinerary: LAX → ICN (KE012) → NRT Tokyo (OZ104), with a
+// 7h20m Seoul layover. ETA-only (no hard deadline). Flight anchors are real
 // scheduled times for Jun 20–22, 2026, expressed as ISO-with-offset and
-// converted to UTC minutes so the multi-day / 3-timezone math is correct.
+// converted to UTC minutes so the multi-day / multi-timezone math is correct.
 
 import type { Trip } from "./types";
 import { TZ, isoToUtcMin } from "./schedule";
 
 export const SEED_TRIP: Trip = {
   origin: { code: "LAX", city: "Los Angeles", tz: TZ.PDT },
-  destination: { code: "PEK", city: "Beijing", place: "Guomao · Beijing CBD", tz: TZ.CST },
+  destination: { code: "NRT", city: "Tokyo", place: "Shibuya · central Tokyo", tz: TZ.JST },
 
   // ── departure side (LAX, international, checked bag, TSA PreCheck) ──
   pre: [
@@ -20,7 +20,7 @@ export const SEED_TRIP: Trip = {
       sub: "Tom Bradley Intl (Terminal B)", dur: 8, mode: "walk", tz: TZ.PDT,
       source: "LAX map", detail: "Departures level → Korean Air row" },
     { id: "checkin", phase: "depart", icon: "badge", title: "Check-in & bag drop",
-      sub: "Korean Air · SkyPriority", dur: 22, mode: "queue", tz: TZ.PDT,
+      sub: "Korean Air · Prestige", dur: 22, mode: "queue", tz: TZ.PDT,
       source: "Intl bag-drop cutoff", detail: "Intl counters close 60 min before departure" },
     { id: "security", phase: "depart", icon: "security", title: "Security",
       sub: "TSA PreCheck — TBIT", dur: 17, mode: "queue", tz: TZ.PDT,
@@ -36,16 +36,16 @@ export const SEED_TRIP: Trip = {
       toCode: "ICN", toCity: "Seoul Incheon", toTerm: "T2", toTz: TZ.KST,
       departUtc: isoToUtcMin("2026-06-20T23:50:00-07:00"),
       arriveUtc: isoToUtcMin("2026-06-22T05:00:00+09:00"),
-      seat: "53K", feed: "flight_status" },
-    { id: "KE863", code: "KE863", carrier: "Korean Air", aircraft: "A330-300",
+      seat: "15A", feed: "flight_status" },
+    { id: "OZ104", code: "OZ104", carrier: "Asiana Airlines", aircraft: "A321-neo",
       fromCode: "ICN", fromCity: "Seoul Incheon", fromTerm: "T2", fromTz: TZ.KST,
-      toCode: "PEK", toCity: "Beijing Shoudu", toTerm: "T2", toTz: TZ.CST,
-      departUtc: isoToUtcMin("2026-06-22T20:00:00+09:00"),
-      arriveUtc: isoToUtcMin("2026-06-22T21:30:00+08:00"),
-      seat: "32A", feed: "flight_status" },
+      toCode: "NRT", toCity: "Tokyo Narita", toTerm: "T1", toTz: TZ.JST,
+      departUtc: isoToUtcMin("2026-06-22T12:20:00+09:00"),
+      arriveUtc: isoToUtcMin("2026-06-22T14:55:00+09:00"),
+      seat: "2A", feed: "flight_status" },
   ],
 
-  // ── connection at Seoul Incheon (stay airside; the 15h is the implicit gap) ──
+  // ── connection at Seoul Incheon (stay airside; the 7h20m is the implicit gap) ──
   connections: [
     { id: "icn", airportCode: "ICN", city: "Seoul Incheon", term: "T2", tz: TZ.KST,
       legs: [
@@ -53,34 +53,34 @@ export const SEED_TRIP: Trip = {
           title: "Deplane KE012", sub: "ICN Terminal 2", dur: 10, mode: "walk", tz: TZ.KST,
           source: "Avg wide-body", detail: "Door open → concourse" },
         { id: "transferICN", phase: "connection", icon: "transfer_within_a_station",
-          title: "Transfer to KE863 gate", sub: "Same terminal (T2)", dur: 15, mode: "walk", tz: TZ.KST,
+          title: "Transfer to OZ104 gate", sub: "Same terminal (T2)", dur: 15, mode: "walk", tz: TZ.KST,
           source: "ICN map", detail: "Airside transfer · no re-entry" },
       ] },
   ],
 
-  // ── arrival side (Beijing PEK, international → city) ──
+  // ── arrival side (Tokyo Narita, international → city) ──
   post: [
-    { id: "deplanePEK", phase: "arrive", icon: "airline_seat_recline_normal", title: "Deplane & taxi to gate",
-      sub: "PEK Terminal 2", dur: 10, mode: "walk", tz: TZ.CST,
+    { id: "deplaneNRT", phase: "arrive", icon: "airline_seat_recline_normal", title: "Deplane & taxi to gate",
+      sub: "NRT Terminal 1", dur: 9, mode: "walk", tz: TZ.JST,
       source: "Avg narrow-body", detail: "Door open → jet bridge" },
     { id: "immigration", phase: "arrive", icon: "fingerprint", title: "Immigration",
-      sub: "Foreign passports", dur: 30, mode: "queue", tz: TZ.CST,
-      source: "PEK queue feed", detail: "Foreign-passport hall · 30 min", live: true, feed: "immigration_wait" },
+      sub: "Foreign passports", dur: 25, mode: "queue", tz: TZ.JST,
+      source: "NRT queue feed", detail: "Foreign-passport hall · 25 min", live: true, feed: "immigration_wait" },
     { id: "baggage", phase: "arrive", icon: "luggage", title: "Baggage claim",
-      sub: "Carousel — KE863", dur: 18, mode: "queue", tz: TZ.CST,
-      source: "Belt estimate", detail: "First bags ~18 min after land", live: true, feed: "baggage_estimate" },
+      sub: "Carousel — OZ104", dur: 16, mode: "queue", tz: TZ.JST,
+      source: "Belt estimate", detail: "First bags ~16 min after land", live: true, feed: "baggage_estimate" },
     { id: "customs", phase: "arrive", icon: "inventory_2", title: "Customs",
-      sub: "Nothing to declare", dur: 6, mode: "queue", tz: TZ.CST,
+      sub: "Nothing to declare", dur: 6, mode: "queue", tz: TZ.JST,
       source: "Green channel", detail: "Usually walk-through" },
-    { id: "didi", phase: "arrive", icon: "local_taxi", title: "Didi pickup",
-      sub: "Ground transport · zone 2", dur: 8, mode: "ride", tz: TZ.CST,
-      source: "Didi", detail: "8 min wait · Express", live: true, feed: "traffic" },
-    { id: "drive", phase: "arrive", icon: "directions_car", title: "Drive to Beijing CBD",
-      sub: "Airport Expwy → Guomao", dur: 45, mode: "ride", tz: TZ.CST,
-      source: "Maps traffic", detail: "~32 km · moderate flow", live: true, feed: "traffic",
-      from: { lat: 40.0799, lng: 116.6031 }, to: { lat: 39.9085, lng: 116.4575 } },
-    { id: "walkPEK", phase: "arrive", icon: "directions_walk", title: "Walk to destination",
-      sub: "Guomao · Beijing CBD", dur: 6, mode: "walk", tz: TZ.CST,
+    { id: "uber", phase: "arrive", icon: "local_taxi", title: "Uber pickup",
+      sub: "Arrivals · rideshare bay", dur: 8, mode: "ride", tz: TZ.JST,
+      source: "Uber", detail: "8 min wait · Uber", live: true, feed: "traffic" },
+    { id: "drive", phase: "arrive", icon: "directions_car", title: "Drive to Shibuya",
+      sub: "Higashi-Kantō Expwy → Shibuya", dur: 75, mode: "ride", tz: TZ.JST,
+      source: "Maps traffic", detail: "~70 km · moderate flow", live: true, feed: "traffic",
+      from: { lat: 35.7647, lng: 140.3863 }, to: { lat: 35.6595, lng: 139.7004 } },
+    { id: "walkNRT", phase: "arrive", icon: "directions_walk", title: "Walk to destination",
+      sub: "Shibuya · central Tokyo", dur: 6, mode: "walk", tz: TZ.JST,
       source: "Building map", detail: "Drop-off → entrance" },
   ],
 

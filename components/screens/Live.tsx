@@ -20,9 +20,9 @@ export interface AlertEntry {
 
 const WATCHING = [
   { icon: "flight", label: "KE012 LAX→ICN", src: "Korean Air / AeroAPI" },
-  { icon: "connecting_airports", label: "KE863 ICN→PEK", src: "Korean Air / AeroAPI" },
-  { icon: "fingerprint", label: "PEK immigration", src: "Airport queue" },
-  { icon: "directions_car", label: "Beijing traffic", src: "Google Routes" },
+  { icon: "connecting_airports", label: "OZ104 ICN→NRT", src: "Asiana / AeroAPI" },
+  { icon: "fingerprint", label: "NRT immigration", src: "Airport queue" },
+  { icon: "directions_car", label: "Tokyo traffic", src: "Google Routes" },
 ];
 
 function StepHeader({ n, title, model, t, color }: { n: number; title: string; model: string; t: Theme; color: string }) {

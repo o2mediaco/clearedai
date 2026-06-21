@@ -90,11 +90,15 @@ export function extractJson<T = unknown>(text: string): T | null {
       depth--;
       if (depth === 0) {
         const slice = s.slice(start, i + 1);
-        try {
-          return JSON.parse(slice) as T;
-        } catch {
-          return null;
-        }
+        const tryParse = (txt: string): T | null => {
+          try {
+            return JSON.parse(txt) as T;
+          } catch {
+            return null;
+          }
+        };
+        // parse as-is, else repair trailing commas (a common small-model slip)
+        return tryParse(slice) ?? tryParse(slice.replace(/,(\s*[}\]])/g, "$1"));
       }
     }
   }

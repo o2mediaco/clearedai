@@ -55,7 +55,7 @@ function mockRouter(readings: FeedReading[], statusId: string, slipBefore: numbe
     return {
       severity: "low",
       engage: true,
-      strategy: "Flight delay detected but the 15h Seoul layover absorbs it — projected arrival unchanged. Log and inform; no re-route.",
+      strategy: "Flight delay detected but the Seoul layover absorbs it — projected arrival unchanged. Log and inform; no re-route.",
       affected: uniqueFeeds(readings),
     };
   const severity: Severity =
@@ -72,10 +72,21 @@ function mockAnalyst(trip: Trip, ov: Overrides, readings: FeedReading[]): Analys
   const s = computeSchedule(trip, ov);
   const tz = trip.destination.tz;
   const worst = s.postLegs.filter((l) => l.live).sort((a, b) => b.dur - a.dur)[0];
+  const parts = readings.map((r) => {
+    if (r.scope === "flight") {
+      const f = trip.flights.find((x) => x.id === r.target);
+      return `${r.target}${f ? ` (${f.fromCode}→${f.toCode})` : ""} is delayed ${r.value} min`;
+    }
+    return `${legName(trip, r.target)} is ${r.value >= 0 ? `${r.value} min slower` : `${Math.abs(r.value)} min faster`}`;
+  });
+  const lead = parts[0] ?? "Conditions updated";
+  const narrative =
+    `${lead}${parts.length > 1 ? `; ${parts.slice(1).join(", ")}` : ""}. ` +
+    `Net effect: projected arrival ${fmtTime(s.arriveUtc, tz)} ${tz.label}, ${slipText(s.slip)}.`;
   return {
     bottleneck: worst ? worst.title : "Immigration",
     etaSummary: `Arrival ${fmtTime(s.arriveUtc, tz)} ${fmtDate(s.arriveUtc, tz)} ${tz.label} · ${slipText(s.slip)}.`,
-    narrative: changeLines(trip, readings).join(" "),
+    narrative,
     risks:
       s.slip > 60
         ? ["Arrival slipping past plan by over an hour", `${worst ? worst.title : "Arrival queue"} is the critical path`]
@@ -138,9 +149,10 @@ async function gemmaRouter(ctx: string): Promise<RouterOut | null> {
     { role: "system", content:
       "You are the Lead Router in a multi-agent travel ops system. You intercept live logistics events and triage them by impact on the traveler's PROJECTED ARRIVAL. " +
       "A delay that the layover absorbs (projected arrival unchanged) is LOW severity. A delay that pushes arrival later is higher. " +
-      "Reply ONLY with JSON: {\"severity\":\"none|low|med|high|critical\",\"engage\":boolean,\"strategy\":\"one sentence\",\"affected\":[feedIds]}." },
+      "Reply ONLY with minified JSON: {\"severity\":\"none|low|med|high|critical\",\"engage\":boolean,\"strategy\":\"one sentence\",\"affected\":[feedIds]}. " +
+      "Inside string values use single quotes, never the double-quote character. No markdown, no trailing commas." },
     { role: "user", content: ctx },
-  ], { maxTokens: 250 });
+  ], { maxTokens: 250, temperature: 0.2 });
   return json;
 }
 
@@ -149,9 +161,10 @@ async function gemmaAnalyst(ctx: string): Promise<AnalystOut | null> {
     { role: "system", content:
       "You are the Logistics Analyst. You reason about how a disruption cascades to the final arrival ETA across a multi-flight, multi-timezone trip. " +
       "The arithmetic is already done; interpret it. Reply ONLY with JSON: " +
-      "{\"bottleneck\":\"leg name\",\"etaSummary\":\"one line\",\"narrative\":\"2 sentences\",\"risks\":[\"...\"]}." },
+      "{\"bottleneck\":\"leg name\",\"etaSummary\":\"one line\",\"narrative\":\"2 sentences\",\"risks\":[\"...\"]}. " +
+      "Output minified JSON only. Inside string values use single quotes, never the double-quote character. No markdown, no trailing commas." },
     { role: "user", content: ctx },
-  ], { maxTokens: 350 });
+  ], { maxTokens: 350, temperature: 0.2 });
   return json;
 }
 
@@ -161,10 +174,33 @@ async function gemmaComm(ctx: string): Promise<CommOut | null> {
       "You are Comm & Action Ops. Draft a short push notification and stage machine actions. Reply ONLY with JSON: " +
       "{\"alert\":{\"title\":\"<=6 words\",\"body\":\"1-2 sentences\",\"severity\":\"info|warn|critical\"}," +
       "\"actions\":[{\"type\":\"rideshare|message|calendar\",\"label\":\"<=4 words\",\"detail\":\"what it does\"}]}. " +
-      "If the delay was absorbed and nothing is needed, still send an info alert reassuring the traveler. If truly nothing, alert=null, actions=[]." },
+      "If the delay was absorbed and nothing is needed, still send an info alert reassuring the traveler. If truly nothing, alert=null, actions=[]. " +
+      "Output minified JSON only. Inside string values use single quotes, never the double-quote character. No markdown, no trailing commas." },
     { role: "user", content: ctx },
-  ], { maxTokens: 400 });
+  ], { maxTokens: 400, temperature: 0.2 });
   return json;
+}
+
+type Src = "gemma" | "mock";
+
+/** Run a Gemma worker, falling back to the deterministic worker on error OR on
+ *  unparseable JSON — and report which one was used (per-step provenance). */
+async function runWorker<T>(
+  useGemma: boolean,
+  name: string,
+  run: () => Promise<T | null>,
+  fallback: () => T
+): Promise<{ value: T; via: Src }> {
+  if (!useGemma) return { value: fallback(), via: "mock" };
+  try {
+    const g = await run();
+    if (g != null) return { value: g, via: "gemma" };
+    console.error(`[agent] ${name} (gemma) returned unparseable JSON; using deterministic fallback`);
+    return { value: fallback(), via: "mock" };
+  } catch (e) {
+    console.error(`[agent] ${name} (gemma) failed:`, e instanceof Error ? e.message : e);
+    return { value: fallback(), via: "mock" };
+  }
 }
 
 // ── the tick ───────────────────────────────────────────────────────────
@@ -176,7 +212,6 @@ export async function runTick(trip: Trip, overrides: Overrides, tick: number, fe
   const tz = trip.destination.tz;
 
   const useGemma = hasOpenRouter();
-  let engine: "gemma" | "mock" = useGemma ? "gemma" : "mock";
 
   const events = readings.length ? changeLines(trip, readings).join("\n") : "(no new events this tick)";
   const ctxBase =
@@ -188,53 +223,34 @@ export async function runTick(trip: Trip, overrides: Overrides, tick: number, fe
     `New events:\n${events}\n` +
     `Available feeds: flight_status, security_wait, immigration_wait, baggage_estimate, traffic.`;
 
-  let router: RouterOut;
+  const via: { router: Src; analyst: Src; comm: Src } = { router: "mock", analyst: "mock", comm: "mock" };
+
+  const routerRes = await runWorker(useGemma, "router", () => gemmaRouter(ctxBase), () => mockRouter(readings, after.status.id, before.slip, after.slip));
+  const router = routerRes.value;
+  via.router = routerRes.via;
+
   let analyst: AnalystOut | null = null;
   let comm: CommOut | null = null;
 
-  if (useGemma) {
-    try {
-      router = (await gemmaRouter(ctxBase)) ?? mockRouter(readings, after.status.id, before.slip, after.slip);
-    } catch (e) {
-      console.error("[agent] router (gemma) failed:", e instanceof Error ? e.message : e);
-      engine = "mock";
-      router = mockRouter(readings, after.status.id, before.slip, after.slip);
-    }
-  } else {
-    router = mockRouter(readings, after.status.id, before.slip, after.slip);
-  }
-
   if (router.engage) {
     const analystCtx =
-      ctxBase + `\nChanged: ${readings.map((r) => r.target).join(", ") || "none"}. Leave-by ${fmtTime(after.leaveByUtc, trip.origin.tz)} ${trip.origin.tz.label}.`;
-    if (engine === "gemma") {
-      try {
-        analyst = (await gemmaAnalyst(analystCtx)) ?? mockAnalyst(trip, nextOv, readings);
-      } catch (e) {
-        console.error("[agent] analyst (gemma) failed:", e instanceof Error ? e.message : e);
-        engine = "mock";
-        analyst = mockAnalyst(trip, nextOv, readings);
-      }
-    } else {
-      analyst = mockAnalyst(trip, nextOv, readings);
-    }
+      ctxBase + `\nChanged: ${readings.map((x) => x.target).join(", ") || "none"}. Leave-by ${fmtTime(after.leaveByUtc, trip.origin.tz)} ${trip.origin.tz.label}.`;
+    const analystRes = await runWorker(useGemma, "analyst", () => gemmaAnalyst(analystCtx), () => mockAnalyst(trip, nextOv, readings));
+    analyst = analystRes.value;
+    via.analyst = analystRes.via;
 
     const commCtx =
       analystCtx +
       `\nAnalyst: bottleneck=${analyst.bottleneck}; ${analyst.etaSummary}; risks=${analyst.risks.join("; ")}.\n` +
       `Destination: ${trip.destination.place}. Rideshare legs: Uber (LAX), Uber (${trip.flights[trip.flights.length - 1].toCode}).`;
-    if (engine === "gemma") {
-      try {
-        comm = (await gemmaComm(commCtx)) ?? mockComm(trip, nextOv, readings, before.slip, after.slip);
-      } catch (e) {
-        console.error("[agent] comm (gemma) failed:", e instanceof Error ? e.message : e);
-        engine = "mock";
-        comm = mockComm(trip, nextOv, readings, before.slip, after.slip);
-      }
-    } else {
-      comm = mockComm(trip, nextOv, readings, before.slip, after.slip);
-    }
+    const commRes = await runWorker(useGemma, "comm", () => gemmaComm(commCtx), () => mockComm(trip, nextOv, readings, before.slip, after.slip));
+    comm = commRes.value;
+    via.comm = commRes.via;
   }
+
+  // "gemma" if Gemma actually produced at least one step this tick, else "mock"
+  const engine: "gemma" | "mock" =
+    via.router === "gemma" || via.analyst === "gemma" || via.comm === "gemma" ? "gemma" : "mock";
 
   return {
     reasoning: router.strategy,
@@ -248,7 +264,7 @@ export async function runTick(trip: Trip, overrides: Overrides, tick: number, fe
     status: after.status,
     alert: comm?.alert ?? null,
     actions: comm?.actions ?? [],
-    pipeline: { router, analyst, comm },
+    pipeline: { router, analyst, comm, via },
     engine,
     model: useGemma ? modelFor("router") : undefined,
   };

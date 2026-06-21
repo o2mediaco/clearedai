@@ -26,7 +26,7 @@ const WATCHING = [
   { icon: "directions_car", label: "Tokyo traffic", src: "Google Routes" },
 ];
 
-function PipeStep({ t, n, color, title, agent, last = false, children }: { t: Theme; n: number; color: string; title: string; agent: string; last?: boolean; children: React.ReactNode }) {
+function PipeStep({ t, n, color, title, agent, last = false, degraded = false, children }: { t: Theme; n: number; color: string; title: string; agent: string; last?: boolean; degraded?: boolean; children: React.ReactNode }) {
   return (
     <div style={{ display: "flex", gap: 12 }}>
       <div style={{ width: 26, flexShrink: 0, display: "flex", flexDirection: "column", alignItems: "center" }}>
@@ -35,7 +35,12 @@ function PipeStep({ t, n, color, title, agent, last = false, children }: { t: Th
       </div>
       <div style={{ flex: 1, minWidth: 0, paddingBottom: last ? 0 : 18 }}>
         <div style={{ fontFamily: t.body, fontWeight: 700, fontSize: 14, color: t.text }}>{title}</div>
-        <div style={{ fontFamily: t.mono, fontSize: 9.5, color: t.faint, letterSpacing: 0.4, marginTop: 1 }}>{agent}</div>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 1 }}>
+          <span style={{ fontFamily: t.mono, fontSize: 9.5, color: t.faint, letterSpacing: 0.4 }}>{agent}</span>
+          {degraded && (
+            <span title="Gemma's reply didn't parse — used the deterministic worker for this step" style={{ fontFamily: t.mono, fontSize: 8.5, fontWeight: 700, letterSpacing: 0.4, color: t.amber, background: t.amber + "1e", padding: "1px 5px", borderRadius: 5 }}>DETERMINISTIC</span>
+          )}
+        </div>
         <div style={{ marginTop: 8 }}>{children}</div>
       </div>
     </div>
@@ -58,7 +63,7 @@ function PipelineCard({ p, t, engine, model }: { p: PipelineTrace; t: Theme; eng
     <Card t={t}>
       <SectionLabel t={t} right={label}>How Gemma handled it</SectionLabel>
 
-      <PipeStep t={t} n={1} color={t.accent} title="What I noticed" agent="Lead Router">
+      <PipeStep t={t} n={1} color={t.accent} title="What I noticed" agent="Lead Router" degraded={engine === "gemma" && p.via.router === "mock"}>
         <div style={{ display: "inline-flex", alignItems: "center", gap: 7, padding: "4px 11px", borderRadius: 99, background: sevColor + "1e", marginBottom: 9 }}>
           <StatusDot color={sevColor} />
           <span style={{ fontFamily: t.body, fontWeight: 700, fontSize: 12, color: sevColor }}>{sevInfo.word}</span>
@@ -68,7 +73,7 @@ function PipelineCard({ p, t, engine, model }: { p: PipelineTrace; t: Theme; eng
       </PipeStep>
 
       {p.analyst && (
-        <PipeStep t={t} n={2} color="#b794f6" title="What it means for your trip" agent="Logistics Analyst">
+        <PipeStep t={t} n={2} color="#b794f6" title="What it means for your trip" agent="Logistics Analyst" degraded={engine === "gemma" && p.via.analyst === "mock"}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 11px", borderRadius: 10, background: t.surface2, border: `1px solid ${t.lineSoft}`, marginBottom: 9 }}>
             <Sym name="schedule" size={16} color={t.accent} />
             <span style={{ fontFamily: t.body, fontSize: 12.5, fontWeight: 600, color: t.text }}>{p.analyst.etaSummary}</span>
@@ -88,7 +93,7 @@ function PipelineCard({ p, t, engine, model }: { p: PipelineTrace; t: Theme; eng
       )}
 
       {p.comm && (
-        <PipeStep t={t} n={3} color={t.green} title="What I did about it" agent="Comm & Action Ops" last>
+        <PipeStep t={t} n={3} color={t.green} title="What I did about it" agent="Comm & Action Ops" last degraded={engine === "gemma" && p.via.comm === "mock"}>
           {p.comm.alert ? (
             <div style={{ fontFamily: t.body, fontSize: 13.5, color: t.text, lineHeight: 1.5 }}>
               Sent you an alert — <span style={{ fontWeight: 700 }}>“{p.comm.alert.title}”</span>

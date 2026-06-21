@@ -203,6 +203,9 @@ export interface PipelineTrace {
   router: RouterOut;
   analyst: AnalystOut | null;
   comm: CommOut | null;
+  /** per-step provenance: did Gemma produce it, or did we fall back to the
+   *  deterministic worker (e.g. Gemma returned unparseable JSON)? */
+  via: { router: "gemma" | "mock"; analyst: "gemma" | "mock"; comm: "gemma" | "mock" };
 }
 
 export interface AgentTickRequest {

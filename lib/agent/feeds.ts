@@ -173,11 +173,16 @@ export async function senseFeeds(trip: Trip, ov: Overrides, tick: number, real: 
   const out: FeedReading[] = [];
   for (const f of FEEDS) {
     let got: FeedReading[] = [];
-    if (real && f.pollReal) {
-      try {
-        got = await f.pollReal(trip, ov);
-      } catch {
-        got = f.pollMock(tick, ov);
+    if (real) {
+      // Live mode is real-only: a feed emits data ONLY from its live source.
+      // No mock fallback — if there's no live source, or the live call errors or
+      // returns nothing, the feed stays silent (no scripted/fake data).
+      if (f.pollReal) {
+        try {
+          got = await f.pollReal(trip, ov);
+        } catch {
+          got = [];
+        }
       }
     } else {
       got = f.pollMock(tick, ov);

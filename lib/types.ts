@@ -208,6 +208,7 @@ export interface PipelineTrace {
 export interface AgentTickRequest {
   overrides: Overrides;
   tick: number;
+  feedMode?: "real" | "mock";
 }
 
 export interface AgentTickResponse {

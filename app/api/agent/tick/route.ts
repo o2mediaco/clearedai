@@ -12,7 +12,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function POST(req: Request) {
-  let body: { overrides?: Overrides; tick?: number } = {};
+  let body: { overrides?: Overrides; tick?: number; feedMode?: "real" | "mock" } = {};
   try {
     body = await req.json();
   } catch {
@@ -20,9 +20,16 @@ export async function POST(req: Request) {
   }
   const overrides: Overrides = body.overrides ?? freshOverrides();
   const tick = Number.isFinite(body.tick) ? Number(body.tick) : 1;
+  // request toggle wins; otherwise fall back to the FEED_MODE env default
+  const feedMode: "real" | "mock" =
+    body.feedMode === "real" || body.feedMode === "mock"
+      ? body.feedMode
+      : process.env.FEED_MODE === "real"
+        ? "real"
+        : "mock";
 
   try {
-    const result = await runTick(SEED_TRIP, overrides, tick);
+    const result = await runTick(SEED_TRIP, overrides, tick, feedMode);
     return NextResponse.json(result);
   } catch (err) {
     const message = err instanceof Error ? err.message : "agent error";

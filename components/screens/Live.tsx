@@ -26,68 +26,101 @@ const WATCHING = [
   { icon: "directions_car", label: "Tokyo traffic", src: "Google Routes" },
 ];
 
-function StepHeader({ n, title, model, t, color }: { n: number; title: string; model: string; t: Theme; color: string }) {
+function PipeStep({ t, n, color, title, agent, last = false, children }: { t: Theme; n: number; color: string; title: string; agent: string; last?: boolean; children: React.ReactNode }) {
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 8 }}>
-      <div style={{ width: 22, height: 22, borderRadius: 99, background: color, color: "#06140d", fontFamily: t.mono, fontWeight: 700, fontSize: 12, display: "flex", alignItems: "center", justifyContent: "center" }}>{n}</div>
-      <span style={{ fontFamily: t.body, fontWeight: 700, fontSize: 13, color: t.text }}>{title}</span>
-      <span style={{ fontFamily: t.mono, fontSize: 9.5, color: t.faint, marginLeft: "auto" }}>{model}</span>
+    <div style={{ display: "flex", gap: 12 }}>
+      <div style={{ width: 26, flexShrink: 0, display: "flex", flexDirection: "column", alignItems: "center" }}>
+        <div style={{ width: 26, height: 26, borderRadius: 99, background: color + "22", border: `1.5px solid ${color}`, color, fontFamily: t.mono, fontWeight: 700, fontSize: 12, display: "flex", alignItems: "center", justifyContent: "center" }}>{n}</div>
+        {!last && <div style={{ flex: 1, width: 2, background: t.line, marginTop: 4, minHeight: 12 }} />}
+      </div>
+      <div style={{ flex: 1, minWidth: 0, paddingBottom: last ? 0 : 18 }}>
+        <div style={{ fontFamily: t.body, fontWeight: 700, fontSize: 14, color: t.text }}>{title}</div>
+        <div style={{ fontFamily: t.mono, fontSize: 9.5, color: t.faint, letterSpacing: 0.4, marginTop: 1 }}>{agent}</div>
+        <div style={{ marginTop: 8 }}>{children}</div>
+      </div>
     </div>
   );
 }
 
+const SEV: Record<string, { word: string; tone: "good" | "warn" | "bad" }> = {
+  none: { word: "No impact", tone: "good" },
+  low: { word: "Low impact", tone: "good" },
+  med: { word: "Moderate impact", tone: "warn" },
+  high: { word: "High impact", tone: "bad" },
+  critical: { word: "Critical", tone: "bad" },
+};
+
 function PipelineCard({ p, t, engine, model }: { p: PipelineTrace; t: Theme; engine: string; model: string }) {
-  const sevColor = p.router.severity === "critical" || p.router.severity === "high" ? t.red : p.router.severity === "med" ? t.amber : p.router.severity === "low" ? t.green : t.dim;
-  const label = engine === "gemma" ? model.replace("google/", "") : "deterministic fallback";
+  const sevInfo = SEV[p.router.severity] ?? { word: p.router.severity, tone: "warn" as const };
+  const sevColor = sevInfo.tone === "bad" ? t.red : sevInfo.tone === "warn" ? t.amber : t.green;
+  const label = engine === "gemma" ? `Gemma · ${model.replace("google/", "")}` : "offline fallback";
   return (
     <Card t={t}>
-      <SectionLabel t={t} right={label}>Agent pipeline</SectionLabel>
-      <div style={{ paddingBottom: 12, borderBottom: `1px solid ${t.lineSoft}` }}>
-        <StepHeader n={1} title="Lead Router" model="triage" t={t} color={t.accent} />
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-          <span style={{ fontFamily: t.mono, fontSize: 11, fontWeight: 700, color: sevColor, textTransform: "uppercase", padding: "2px 8px", borderRadius: 6, background: sevColor + "1e" }}>{p.router.severity}</span>
-          <span style={{ fontFamily: t.body, fontSize: 11.5, color: t.faint }}>{p.router.engage ? "pipeline engaged" : "monitoring only"}</span>
+      <SectionLabel t={t} right={label}>How Gemma handled it</SectionLabel>
+
+      <PipeStep t={t} n={1} color={t.accent} title="What I noticed" agent="Lead Router">
+        <div style={{ display: "inline-flex", alignItems: "center", gap: 7, padding: "4px 11px", borderRadius: 99, background: sevColor + "1e", marginBottom: 9 }}>
+          <StatusDot color={sevColor} />
+          <span style={{ fontFamily: t.body, fontWeight: 700, fontSize: 12, color: sevColor }}>{sevInfo.word}</span>
+          <span style={{ fontFamily: t.body, fontSize: 11.5, color: t.dim }}>· {p.router.engage ? "taking action" : "just monitoring"}</span>
         </div>
-        <div style={{ fontFamily: t.body, fontSize: 12.5, color: t.dim, lineHeight: 1.45 }}>{p.router.strategy}</div>
-      </div>
+        <div style={{ fontFamily: t.body, fontSize: 13.5, color: t.text, lineHeight: 1.5 }}>{p.router.strategy}</div>
+      </PipeStep>
+
       {p.analyst && (
-        <div style={{ padding: "12px 0", borderBottom: `1px solid ${t.lineSoft}` }}>
-          <StepHeader n={2} title="Logistics Analyst" model="cascade" t={t} color="#b794f6" />
-          <div style={{ fontFamily: t.mono, fontSize: 11.5, color: t.text, marginBottom: 4 }}>{p.analyst.etaSummary}</div>
-          <div style={{ fontFamily: t.body, fontSize: 12.5, color: t.dim, lineHeight: 1.45, marginBottom: 6 }}>{p.analyst.narrative}</div>
-          {p.analyst.risks.map((r, i) => (
-            <div key={i} style={{ display: "flex", gap: 6, alignItems: "flex-start", marginTop: 3 }}>
-              <Sym name="chevron_right" size={14} color={t.faint} />
-              <span style={{ fontFamily: t.body, fontSize: 12, color: t.dim }}>{r}</span>
+        <PipeStep t={t} n={2} color="#b794f6" title="What it means for your trip" agent="Logistics Analyst">
+          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 11px", borderRadius: 10, background: t.surface2, border: `1px solid ${t.lineSoft}`, marginBottom: 9 }}>
+            <Sym name="schedule" size={16} color={t.accent} />
+            <span style={{ fontFamily: t.body, fontSize: 12.5, fontWeight: 600, color: t.text }}>{p.analyst.etaSummary}</span>
+          </div>
+          <div style={{ fontFamily: t.body, fontSize: 13.5, color: t.text, lineHeight: 1.5 }}>{p.analyst.narrative}</div>
+          {p.analyst.risks.length > 0 && (
+            <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 7 }}>
+              {p.analyst.risks.map((r, i) => (
+                <div key={i} style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+                  <Sym name="arrow_right" size={17} color={t.faint} style={{ marginTop: -1 }} />
+                  <span style={{ fontFamily: t.body, fontSize: 12.5, color: t.dim, lineHeight: 1.45 }}>{r}</span>
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
-      )}
-      {p.comm && (
-        <div style={{ paddingTop: 12 }}>
-          <StepHeader n={3} title="Comm & Action Ops" model="drafts" t={t} color={t.green} />
-          {p.comm.alert ? (
-            <div style={{ fontFamily: t.body, fontSize: 12.5, color: t.dim, lineHeight: 1.45 }}>Drafted alert: <span style={{ color: t.text, fontWeight: 600 }}>“{p.comm.alert.title}”</span></div>
-          ) : (
-            <div style={{ fontFamily: t.body, fontSize: 12.5, color: t.faint }}>No user action required.</div>
           )}
-          {p.comm.actions.map((a: AgentAction, i) => (
-            <div key={i} style={{ display: "flex", alignItems: "center", gap: 9, marginTop: 8, padding: "9px 11px", borderRadius: 12, background: t.surface2, border: `1px solid ${t.lineSoft}` }}>
-              <Sym name={a.type === "rideshare" ? "local_taxi" : a.type === "message" ? "sms" : "event_available"} size={18} color={t.accent} />
-              <div style={{ minWidth: 0, flex: 1 }}>
-                <div style={{ fontFamily: t.body, fontWeight: 700, fontSize: 12.5, color: t.text }}>{a.label}</div>
-                <div style={{ fontFamily: t.body, fontSize: 11, color: t.faint, lineHeight: 1.35 }}>{a.detail}</div>
-              </div>
+        </PipeStep>
+      )}
+
+      {p.comm && (
+        <PipeStep t={t} n={3} color={t.green} title="What I did about it" agent="Comm & Action Ops" last>
+          {p.comm.alert ? (
+            <div style={{ fontFamily: t.body, fontSize: 13.5, color: t.text, lineHeight: 1.5 }}>
+              Sent you an alert — <span style={{ fontWeight: 700 }}>“{p.comm.alert.title}”</span>
             </div>
-          ))}
-        </div>
+          ) : (
+            <div style={{ fontFamily: t.body, fontSize: 13.5, color: t.dim, lineHeight: 1.5 }}>Nothing you need to do — you’re all set.</div>
+          )}
+          {p.comm.actions.length > 0 && (
+            <>
+              <div style={{ fontFamily: t.mono, fontSize: 9.5, letterSpacing: 1, color: t.faint, textTransform: "uppercase", margin: "12px 0 7px" }}>Ready for you</div>
+              {p.comm.actions.map((a: AgentAction, i) => (
+                <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 7, padding: "10px 12px", borderRadius: 12, background: t.surface2, border: `1px solid ${t.lineSoft}` }}>
+                  <div style={{ width: 30, height: 30, borderRadius: 8, background: t.accent + "1c", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                    <Sym name={a.type === "rideshare" ? "local_taxi" : a.type === "message" ? "sms" : "event_available"} size={17} color={t.accent} />
+                  </div>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ fontFamily: t.body, fontWeight: 700, fontSize: 13, color: t.text }}>{a.label}</div>
+                    <div style={{ fontFamily: t.body, fontSize: 11.5, color: t.dim, lineHeight: 1.4 }}>{a.detail}</div>
+                  </div>
+                  <Sym name="chevron_right" size={18} color={t.faint} />
+                </div>
+              ))}
+            </>
+          )}
+        </PipeStep>
       )}
     </Card>
   );
 }
 
 export default function Live({
-  s, t, trip, tick, loading, engine, model, pipeline, alerts, onTick, onReset, maxTicks, wide,
+  s, t, trip, tick, loading, engine, model, pipeline, alerts, onTick, onReset, maxTicks, wide, feedMode, setFeedMode,
 }: {
   s: Schedule;
   t: Theme;
@@ -102,6 +135,8 @@ export default function Live({
   onReset: () => void;
   maxTicks: number;
   wide: boolean;
+  feedMode: "mock" | "real";
+  setFeedMode: (m: "mock" | "real") => void;
 }) {
   const done = tick >= maxTicks;
   const tz = trip.destination.tz;
@@ -125,7 +160,19 @@ export default function Live({
 
   const feedsCard = (
     <Card t={t}>
-      <SectionLabel t={t} right={`${WATCHING.length} feeds`}>Watching for you</SectionLabel>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 2px 10px", gap: 10 }}>
+        <span style={{ fontFamily: t.mono, fontSize: 11, letterSpacing: 1.5, textTransform: "uppercase", color: t.faint, fontWeight: 600 }}>Watching for you</span>
+        <div style={{ display: "flex", gap: 3, padding: 3, borderRadius: 99, background: t.surface2, border: `1px solid ${t.line}`, flexShrink: 0 }}>
+          {(["mock", "real"] as const).map((m) => {
+            const active = feedMode === m;
+            return (
+              <button key={m} onClick={() => setFeedMode(m)} title={m === "real" ? "Live FlightAware + Google data" : "Scripted demo arc"} style={{ border: "none", cursor: "pointer", borderRadius: 99, padding: "4px 11px", fontFamily: t.body, fontSize: 11, fontWeight: 700, background: active ? t.accent : "transparent", color: active ? "#06140d" : t.dim, transition: "all .15s" }}>
+                {m === "mock" ? "Mock" : "Live data"}
+              </button>
+            );
+          })}
+        </div>
+      </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 9 }}>
         {WATCHING.map((w) => (
           <div key={w.label} style={{ display: "flex", alignItems: "center", gap: 9, padding: "9px 10px", borderRadius: 12, background: t.surface2, border: `1px solid ${t.lineSoft}` }}>

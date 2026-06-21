@@ -5,18 +5,19 @@ import { makeTheme, Sym, StatusDot, type Theme } from "@/components/ui";
 import Today from "@/components/screens/Today";
 import Timeline from "@/components/screens/Timeline";
 import Live, { type AlertEntry } from "@/components/screens/Live";
-import { computeSchedule, freshOverrides, fmtTime, fmtDur } from "@/lib/schedule";
+import { computeSchedule, freshOverrides, fmtTime } from "@/lib/schedule";
 import { SEED_TRIP } from "@/lib/trip";
 import type { Overrides, Tab, PipelineTrace, AgentTickResponse, Schedule } from "@/lib/types";
 
 const ACCENT = "#4f8cff";
 const MAX_TICKS = 4;
 const DESKTOP_BP = 1024;
+type FeedMode = "mock" | "real";
 
 const NAV: { id: Tab; icon: string; label: string }[] = [
   { id: "today", icon: "home", label: "Today" },
   { id: "timeline", icon: "checklist", label: "Timeline" },
-  { id: "live", icon: "notifications", label: "Live" },
+  { id: "live", icon: "smart_toy", label: "Agent" },
 ];
 
 /** Viewport hook with SSR-safe mounting (avoids hydration mismatch). */
@@ -72,7 +73,7 @@ function TripChip({ t, trip }: { t: Theme; trip: typeof SEED_TRIP }) {
   );
 }
 
-function Sidebar({ t, tab, go, alert, s, engine, trip }: { t: Theme; tab: Tab; go: (x: Tab) => void; alert: number; s: Schedule; engine: "gemma" | "mock" | null; trip: typeof SEED_TRIP }) {
+function Sidebar({ t, tab, go, alert, trip }: { t: Theme; tab: Tab; go: (x: Tab) => void; alert: number; trip: typeof SEED_TRIP }) {
   return (
     <aside style={{ width: 264, flexShrink: 0, height: "100dvh", position: "sticky", top: 0, display: "flex", flexDirection: "column", padding: "24px 16px", borderRight: `1px solid ${t.line}`, background: t.bgTop, gap: 22 }}>
       <Brand t={t} />
@@ -95,20 +96,6 @@ function Sidebar({ t, tab, go, alert, s, engine, trip }: { t: Theme; tab: Tab; g
           );
         })}
       </nav>
-
-      <div style={{ marginTop: "auto", padding: 14, borderRadius: t.radius, background: `linear-gradient(160deg, ${t.surface2}, ${t.surface})`, border: `1px solid ${s.status.color}33` }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontFamily: t.body, fontWeight: 700, fontSize: 12, color: s.status.color }}>
-            <StatusDot color={s.status.color} pulse /> {s.status.label}
-          </span>
-          <span style={{ fontFamily: t.mono, fontSize: 9, color: engine === "gemma" ? t.accent : t.faint }}>{engine === "gemma" ? "● Gemma" : engine === "mock" ? "○ mock" : "idle"}</span>
-        </div>
-        <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginTop: 8 }}>
-          <span style={{ fontFamily: t.display, fontWeight: 600, fontSize: 24, color: t.text }}>{fmtTime(s.arriveUtc, trip.destination.tz)}</span>
-          <span style={{ fontFamily: t.body, fontSize: 11, color: t.dim }}>ETA {trip.destination.code}</span>
-        </div>
-        <div style={{ fontFamily: t.mono, fontSize: 11, color: t.faint, marginTop: 3 }}>{s.slip <= 0 ? "on schedule" : `+${fmtDur(s.slip)} vs plan`}</div>
-      </div>
     </aside>
   );
 }
@@ -158,6 +145,7 @@ export default function Page() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [liveRideMin, setLiveRideMin] = useState<number | null>(null);
+  const [feedMode, setFeedMode] = useState<FeedMode>("mock");
 
   // Pull live Google Routes traffic for the "Uber to LAX" pre-flight leg once on mount.
   useEffect(() => {
@@ -197,7 +185,7 @@ export default function Page() {
     setError(null);
     const next = tick + 1;
     try {
-      const res = await fetch("/api/agent/tick", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ overrides, tick: next }) });
+      const res = await fetch("/api/agent/tick", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ overrides, tick: next, feedMode }) });
       const data: AgentTickResponse & { error?: string } = await res.json();
       if (data.error) { setError(data.error); return; }
       setOverrides(data.overrides);
@@ -213,7 +201,7 @@ export default function Page() {
     } finally {
       setLoading(false);
     }
-  }, [overrides, tick, nowUtc, trip]);
+  }, [overrides, tick, nowUtc, trip, feedMode]);
 
   const onReset = useCallback(() => {
     setOverrides(freshOverrides());
@@ -225,12 +213,15 @@ export default function Page() {
     setError(null);
   }, []);
 
+  // Switching data source restarts the run so mock/live don't get interleaved.
+  const changeFeedMode = useCallback((m: FeedMode) => { setFeedMode(m); onReset(); }, [onReset]);
+
   const wide = mounted && isDesktop;
 
   let screen: React.ReactNode;
   if (tab === "today") screen = <Today s={schedule} t={t} nowUtc={nowUtc} go={go} trip={trip} wide={wide} />;
   else if (tab === "timeline") screen = <Timeline s={schedule} t={t} changedSet={changedSetOf(overrides)} trip={trip} wide={wide} />;
-  else screen = <Live s={schedule} t={t} trip={trip} tick={tick} loading={loading} engine={engine} model={model} pipeline={pipeline} alerts={alerts} onTick={onTick} onReset={onReset} maxTicks={MAX_TICKS} wide={wide} />;
+  else screen = <Live s={schedule} t={t} trip={trip} tick={tick} loading={loading} engine={engine} model={model} pipeline={pipeline} alerts={alerts} onTick={onTick} onReset={onReset} maxTicks={MAX_TICKS} wide={wide} feedMode={feedMode} setFeedMode={changeFeedMode} />;
 
   const maxWidth = tab === "timeline" ? 660 : 1000;
   const errBanner = error && (
@@ -247,7 +238,7 @@ export default function Page() {
   if (wide) {
     return (
       <div style={{ ...baseRoot, height: "100dvh", display: "flex", flexDirection: "row" }}>
-        <Sidebar t={t} tab={tab} go={go} alert={alerts.length} s={schedule} engine={engine} trip={trip} />
+        <Sidebar t={t} tab={tab} go={go} alert={alerts.length} trip={trip} />
         <main className="scrollarea" style={{ flex: 1, overflowY: "auto", height: "100dvh" }}>
           <div style={{ maxWidth, margin: "0 auto", width: "100%", padding: "32px 28px 64px" }}>
             {errBanner}

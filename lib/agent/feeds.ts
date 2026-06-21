@@ -168,9 +168,8 @@ export function applyReadings(ov: Overrides, readings: FeedReading[]): Overrides
   return next;
 }
 
-/** Sense the world: poll every feed once. */
-export async function senseFeeds(trip: Trip, ov: Overrides, tick: number): Promise<FeedReading[]> {
-  const real = process.env.FEED_MODE === "real";
+/** Sense the world: poll every feed once. `real` selects live APIs vs the mock arc. */
+export async function senseFeeds(trip: Trip, ov: Overrides, tick: number, real: boolean): Promise<FeedReading[]> {
   const out: FeedReading[] = [];
   for (const f of FEEDS) {
     let got: FeedReading[] = [];

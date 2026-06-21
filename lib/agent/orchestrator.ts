@@ -168,9 +168,9 @@ async function gemmaComm(ctx: string): Promise<CommOut | null> {
 }
 
 // ── the tick ───────────────────────────────────────────────────────────
-export async function runTick(trip: Trip, overrides: Overrides, tick: number): Promise<AgentTickResponse> {
+export async function runTick(trip: Trip, overrides: Overrides, tick: number, feedMode: "real" | "mock"): Promise<AgentTickResponse> {
   const before = computeSchedule(trip, overrides);
-  const readings = await senseFeeds(trip, overrides, tick);
+  const readings = await senseFeeds(trip, overrides, tick, feedMode === "real");
   const nextOv = applyReadings(overrides, readings);
   const after = computeSchedule(trip, nextOv);
   const tz = trip.destination.tz;
